@@ -1,0 +1,116 @@
+{
+  "package_info": {
+    "name": "Fantasy Football MCTS with Injury Awareness",
+    "version": "2.0",
+    "description": "Complete MCTS draft strategy with comprehensive injury risk modeling",
+    "created": "2025-01-08",
+    "features": ["MCTS Draft Strategy", "Injury Risk Modeling", "Rookie Projections", "GPU Acceleration"]
+  },
+  "league_settings": {
+    "teams": 12,
+    "roster_spots": {
+      "QB": 1,
+      "RB": 2,
+      "WR": 2,
+      "TE": 1,
+      "FLEX": 1,
+      "DEF": 1,
+      "K": 1,
+      "BENCH": 6
+    },
+    "flex_positions": ["RB", "WR", "TE"],
+    "total_rounds": 15
+  },
+  "model_parameters": {
+    "risk_penalty": 0.1,
+    "overstack_penalty": 0.5,
+    "bye_penalty": 0.2,
+    "mcts_simulations": 200,
+    "opponent_temperature": 0.5,
+    "position_run_prob": 0.1,
+    "injury_weight": 0.3,
+    "injury_penalty": 0.3,
+    "durability_bonus": 0.2,
+    "diversification_bonus": 0.1,
+    "injury_features_enabled": true
+  },
+  "injury_enhancement": {
+    "enabled": true,
+    "features": [
+      "injury_risk_score",
+      "durability_score", 
+      "historical_injuries",
+      "games_missed_injury",
+      "season_ending_injuries",
+      "avg_recovery_time",
+      "has_recurring_injuries",
+      "position_injury_risk",
+      "age_adjusted_risk",
+      "usage_adjusted_risk",
+      "games_played_pct_adj"
+    ],
+    "integration_methods": ["simple_wrapper", "full_system", "custom"],
+    "risk_tiers": {
+      "iron_man": "< 0.25",
+      "reliable": "0.25 - 0.4", 
+      "moderate_risk": "0.4 - 0.6",
+      "high_risk": "> 0.6"
+    }
+  },
+  "files_included": [
+    "draft_board.csv",
+    "FantasyPros_2025_Overall_ADP_Rankings.csv",
+    "rookie_data_clean.csv",
+    "rookie_regressor.pkl",
+    "injury_enhanced_demo.csv",
+    "mcts_injury_wrapper.py",
+    "injury_aware_mcts.py",
+    "injury_enhancement.py",
+    "injury_aware_model.py",
+    "injury_demo.py"
+  ],
+  "available_demos": [
+    "basic_mcts_demo",
+    "injury_aware_mcts_demo", 
+    "strategy_comparison_demo",
+    "injury_integration_demo",
+    "draft_board_analysis"
+  ],
+  "integration_options": {
+    "simple": {
+      "description": "One-line integration with existing MCTS",
+      "code": "enhanced_pool, enhanced_reward_fn = add_injury_awareness_to_existing_system(player_pool, reward_function, injury_weight=0.3)",
+      "recommended": true
+    },
+    "full": {
+      "description": "Complete injury-aware MCTS system",
+      "code": "strategy = InjuryAwareDraftStrategy(injury_aware_pool)",
+      "advanced": true
+    },
+    "custom": {
+      "description": "Manual integration for specific needs",
+      "code": "enhanced_pool = enhance_player_pool_with_injury_data(player_pool, injury_weight=0.3)",
+      "flexible": true
+    }
+  },
+  "instructions": [
+    "1. Upload this ZIP to Google Colab",
+    "2. Extract files: !unzip colab_data_with_injury.zip",
+    "3. Choose integration method:",
+    "   - Simple: from mcts_injury_wrapper import add_injury_awareness_to_existing_system",
+    "   - Full: from injury_aware_mcts import InjuryAwareDraftStrategy", 
+    "   - Custom: from mcts_injury_wrapper import enhance_player_pool_with_injury_data",
+    "4. Run demos: python injury_demo.py",
+    "5. The system will automatically detect and load injury-enhanced data"
+  ],
+  "new_features": [
+    "🏥 Comprehensive injury risk modeling",
+    "⚡ Injury-aware MCTS algorithm", 
+    "📊 Risk-adjusted player valuations",
+    "🎯 Diversification bonuses for balanced injury exposure",
+    "🔧 Multiple integration options",
+    "📈 Enhanced draft board with injury tiers",
+    "🚀 GPU-accelerated injury calculations",
+    "📋 Injury-aware draft strategy comparisons"
+  ]
+}
