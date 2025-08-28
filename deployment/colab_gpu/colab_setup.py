@@ -143,25 +143,25 @@ def load_sample_data():
             'player_name': f"Player_{i+1:03d}",
             'position': position,
             'team': f"Team_{(i % 32) + 1}",
-            'vorp': vorp,
-            'proj_ppg': base_ppg,
-            'adp_rank': adp_rank,
-            'bye_week': bye_week,
-            'injury_risk_score': injury_risk,
-            'durability_score': durability,
-            'risk_sigma': risk_sigma,
-            'is_rookie': is_rookie,
+            'vorp': float(vorp),
+            'proj_ppg': float(base_ppg),
+            'adp_rank': int(adp_rank),
+            'bye_week': int(bye_week),
+            'injury_risk_score': float(injury_risk),
+            'durability_score': float(durability),
+            'risk_sigma': float(risk_sigma),
+            'is_rookie': bool(is_rookie),
             'historical_injuries': int(np.random.poisson(1) * injury_risk),
             'games_missed_injury': int(np.random.poisson(2) * injury_risk),
             'season_ending_injuries': int(np.random.poisson(0.3) * injury_risk),
-            'avg_recovery_time': np.random.uniform(1, 6) * injury_risk,
-            'has_recurring_injuries': np.random.random() < (injury_risk * 0.5),
-            'position_injury_risk': {
+            'avg_recovery_time': float(np.random.uniform(1, 6) * injury_risk),
+            'has_recurring_injuries': bool(np.random.random() < (injury_risk * 0.5)),
+            'position_injury_risk': float({
                 'QB': 0.15, 'RB': 0.35, 'WR': 0.25, 'TE': 0.20, 'K': 0.05, 'DEF': 0.10
-            }[position],
-            'age_adjusted_risk': injury_risk * np.random.uniform(0.8, 1.2),
-            'usage_adjusted_risk': injury_risk * np.random.uniform(0.9, 1.3),
-            'games_played_pct_adj': max(0.5, 1.0 - injury_risk + np.random.normal(0, 0.1))
+            }[position]),
+            'age_adjusted_risk': float(injury_risk * np.random.uniform(0.8, 1.2)),
+            'usage_adjusted_risk': float(injury_risk * np.random.uniform(0.9, 1.3)),
+            'games_played_pct_adj': float(max(0.5, 1.0 - injury_risk + np.random.normal(0, 0.1)))
         }
         
         players_data.append(player_data)
