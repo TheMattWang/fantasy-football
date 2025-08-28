@@ -586,6 +586,24 @@ class HyperparameterOptimizer:
         
         print(f"📊 Creating hyperparameter optimization report...")
         
+        # Handle empty results
+        if results_df.empty or 'mean_score' not in results_df.columns:
+            print(f"⚠️  No valid results to create report - creating minimal report")
+            
+            # Create a simple text report
+            report_filename = f"optimization_report_{method_name}_{int(time.time())}.txt"
+            with open(report_filename, 'w') as f:
+                f.write(f"Hyperparameter Optimization Report - {method_name.title()}\n")
+                f.write("=" * 50 + "\n\n")
+                f.write("⚠️  No valid results found\n")
+                f.write("All optimization trials failed\n")
+                f.write("\nPossible issues:\n")
+                f.write("- Model compatibility problems\n")
+                f.write("- Insufficient memory or compute resources\n")
+                f.write("- Configuration parameter conflicts\n")
+            
+            return report_filename
+        
         # Create visualizations
         n_params = len([col for col in results_df.columns if col.startswith('param_')])
         fig_height = max(8, n_params * 2)

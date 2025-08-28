@@ -90,7 +90,7 @@ class GPUAcceleratedMCTS:
         """Calculate the size of state representation"""
         # State includes: round, pick position, roster composition, available players stats
         base_features = 20  # Round, pick, position counts, etc.
-        player_features = 50  # Top 50 available players with features
+        player_features = 50 * 5  # Top 50 available players × 5 features per player
         roster_features = 15 * 8  # Max 15 roster spots × 8 features per player
         
         return base_features + player_features + roster_features
@@ -296,6 +296,17 @@ class GPUAcceleratedMCTS:
         best_player = next(p for p in available_players if p.name == best_player_name)
         
         return best_player
+    
+    def search(self, draft_state, player_pool=None, simulations: Optional[int] = None):
+        """
+        Compatibility method for backtesting - calls search_gpu
+        """
+        if player_pool is None:
+            # If no player_pool provided, create from available players
+            player_pool = list(draft_state.available_players)
+        
+        # Call the GPU search method
+        return self.search_gpu(draft_state, player_pool, simulations)[0]  # Return just the player
     
     def train_step(self, experiences: List[Dict]) -> Dict[str, float]:
         """Single training step using experience replay"""
