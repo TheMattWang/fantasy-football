@@ -1,0 +1,35 @@
+{
+  "league_settings": {
+    "teams": 12,
+    "roster_spots": {
+      "QB": 1,
+      "RB": 2,
+      "WR": 2,
+      "TE": 1,
+      "FLEX": 1,
+      "DEF": 1,
+      "K": 1,
+      "BENCH": 6
+    },
+    "total_rounds": 15
+  },
+  "model_parameters": {
+    "risk_penalty": 0.1,
+    "overstack_penalty": 0.5,
+    "bye_penalty": 0.2,
+    "mcts_simulations": 200,
+    "opponent_temperature": 0.5,
+    "position_run_prob": 0.1
+  },
+  "files_included": [
+    "draft_board.csv",
+    "FantasyPros_2025_Overall_ADP_Rankings.csv",
+    "rookie_data_clean.csv"
+  ],
+  "instructions": [
+    "1. Upload this ZIP to Google Colab",
+    "2. Extract files in Colab with: !unzip colab_data.zip",
+    "3. Run the MCTS draft strategy notebook",
+    "4. The notebook will automatically detect and load these files"
+  ]
+}
