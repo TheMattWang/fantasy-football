@@ -665,11 +665,13 @@ def main():
     """Main training script for Colab"""
     
     parser = argparse.ArgumentParser(description='GPU-Accelerated MCTS Training')
-    parser.add_argument('--mode', choices=['train', 'evaluate', 'demo'], default='train')
+    parser.add_argument('--mode', choices=['train', 'evaluate', 'demo', 'hyperopt'], default='train')
     parser.add_argument('--episodes', type=int, default=100)
     parser.add_argument('--gpu', action='store_true', help='Use GPU acceleration')
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--simulations', type=int, default=800)
+    parser.add_argument('--hyperopt-method', choices=['random', 'grid', 'bayesian'], default='random')
+    parser.add_argument('--hyperopt-trials', type=int, default=20)
     
     args = parser.parse_args()
     
@@ -716,6 +718,10 @@ def main():
     elif args.mode == 'demo':
         print("🎮 Demo mode - quick demonstration...")
         run_quick_demo(config)
+        
+    elif args.mode == 'hyperopt':
+        print("🔧 Hyperparameter optimization mode...")
+        run_hyperparameter_optimization(config, args)
 
 
 def create_training_report(results: Dict):
@@ -784,6 +790,188 @@ def evaluate_trained_model():
 def run_quick_demo(config: Dict):
     """Run a quick demonstration"""
     print("🎮 Quick demo not yet implemented")
+
+
+def run_hyperparameter_optimization(config: Dict, args):
+    """Run GPU-accelerated hyperparameter optimization"""
+    
+    print(f"🔧 GPU-Accelerated Hyperparameter Optimization")
+    print(f"   Method: {args.hyperopt_method}")
+    print(f"   Trials: {args.hyperopt_trials}")
+    print(f"   Device: {DEVICE}")
+    
+    # Load player data
+    print("\n📊 Loading player data...")
+    from src.utils.data_loader import create_sample_player_pool
+    player_pool = create_sample_player_pool(n_players=config['player_pool_size'])
+    print(f"✅ Loaded {len(player_pool)} players")
+    
+    # Enhanced player data for optimization
+    for i, player in enumerate(player_pool):
+        player.metadata['bye_week'] = 4 + (i % 11)  # Weeks 4-14
+        player.metadata['injury_risk_score'] = np.random.beta(2, 5)
+        player.metadata['is_rookie'] = np.random.random() < 0.15
+        player.metadata['historical_injuries'] = np.random.poisson(0.8)
+    
+    # Create parameter space for GPU optimization
+    parameter_space = create_gpu_parameter_space()
+    
+    # Create GPU-optimized strategy factory
+    strategy_factory = create_gpu_strategy_factory(config)
+    
+    # Setup GPU-accelerated backtester
+    from src.evaluation.backtesting import DraftBacktester
+    from src.evaluation.hyperparameter_search import HyperparameterOptimizer
+    from src.core.draft import LeagueSettings
+    
+    league_settings = LeagueSettings()
+    backtester = DraftBacktester(player_pool, league_settings)
+    backtester.n_simulations = 5  # Reduced for GPU speed
+    backtester.parallel_workers = 2
+    
+    # Initialize GPU optimizer
+    optimizer = HyperparameterOptimizer(backtester, strategy_factory, parameter_space)
+    
+    # Run optimization based on method
+    if args.hyperopt_method == 'random':
+        results_df = optimizer.random_search(
+            n_configurations=args.hyperopt_trials,
+            n_trials_per_config=3,
+            parallel=True
+        )
+    elif args.hyperopt_method == 'grid':
+        results_df = optimizer.grid_search(
+            n_trials_per_config=3,
+            parallel=True
+        )
+    elif args.hyperopt_method == 'bayesian':
+        results_df = optimizer.bayesian_optimization(
+            n_initial=min(10, args.hyperopt_trials // 2),
+            n_iterations=args.hyperopt_trials - min(10, args.hyperopt_trials // 2),
+            n_trials_per_config=3
+        )
+    
+    # Create optimization report
+    report = optimizer.create_optimization_report(results_df, f"gpu_{args.hyperopt_method}")
+    
+    # Save best parameters for training
+    best_params_file = 'best_hyperparameters.json'
+    with open(best_params_file, 'w') as f:
+        json.dump(optimizer.best_parameters, f, indent=2)
+    
+    print(f"\n✅ Hyperparameter optimization complete!")
+    print(f"🏆 Best score: {optimizer.best_score:.4f}")
+    print(f"💾 Best parameters saved to: {best_params_file}")
+    print(f"📊 Optimization report: gpu_{args.hyperopt_method}_optimization.png")
+    
+    # Optional: Train final model with best parameters
+    print(f"\n🚀 Training final model with optimized parameters...")
+    
+    # Update config with best parameters
+    optimized_config = config.copy()
+    optimized_config.update(optimizer.best_parameters)
+    
+    # Train with optimized parameters
+    trainer = ColabMCTSTrainer(optimized_config)
+    final_results = trainer.train(
+        player_pool=player_pool,
+        n_episodes=config['episodes'] // 2,  # Shorter training after optimization
+        save_interval=20,
+        evaluation_interval=40
+    )
+    
+    print(f"🎉 Optimization and training complete!")
+    print(f"📈 Final optimized model performance: {final_results['final_metrics']}")
+
+
+def create_gpu_parameter_space():
+    """Create parameter space optimized for GPU training"""
+    
+    class GPUParameterSpace:
+        def __init__(self):
+            self.parameters = {
+                'learning_rate': {'type': 'log_uniform', 'values': (1e-4, 1e-2)},
+                'batch_size': {'type': 'categorical', 'values': [32, 64, 128, 256]},
+                'simulations_per_move': {'type': 'integer', 'values': (200, 1000)},
+                'risk_penalty': {'type': 'float', 'values': (0.05, 0.5)},
+                'exploration_constant': {'type': 'float', 'values': (0.5, 3.0)},
+                'value_network_size': {'type': 'categorical', 'values': [128, 256, 512]},
+                'policy_network_size': {'type': 'categorical', 'values': [256, 512, 1024]},
+                'dropout_rate': {'type': 'float', 'values': (0.1, 0.5)},
+            }
+        
+        def sample_random(self, n_samples: int = 1):
+            samples = []
+            for _ in range(n_samples):
+                sample = {}
+                for param_name, param_info in self.parameters.items():
+                    param_type = param_info['type']
+                    values = param_info['values']
+                    
+                    if param_type == 'categorical':
+                        sample[param_name] = np.random.choice(values)
+                    elif param_type == 'integer':
+                        sample[param_name] = np.random.randint(values[0], values[1] + 1)
+                    elif param_type == 'float':
+                        sample[param_name] = np.random.uniform(values[0], values[1])
+                    elif param_type == 'log_uniform':
+                        log_low, log_high = np.log10(values[0]), np.log10(values[1])
+                        sample[param_name] = 10 ** np.random.uniform(log_low, log_high)
+                
+                samples.append(sample)
+            
+            return samples
+    
+    return GPUParameterSpace()
+
+
+def create_gpu_strategy_factory(base_config):
+    """Create strategy factory for GPU optimization"""
+    
+    def gpu_strategy_factory(parameters):
+        """Create GPU-optimized strategy from parameters"""
+        
+        # Update config with hyperparameters
+        config = base_config.copy()
+        config.update(parameters)
+        
+        # Create GPU-accelerated MCTS
+        gpu_mcts = GPUAcceleratedMCTS(
+            player_pool_size=config.get('player_pool_size', 400),
+            simulations_per_move=config.get('simulations_per_move', 800),
+            batch_size=config.get('batch_size', 64),
+            device=DEVICE
+        )
+        
+        # Update network architectures if specified
+        if 'value_network_size' in parameters:
+            gpu_mcts.value_network = MCTSValueNetwork(
+                input_size=gpu_mcts._calculate_state_size(),
+                hidden_size=parameters['value_network_size'],
+                output_size=1
+            ).to(DEVICE)
+        
+        if 'policy_network_size' in parameters:
+            gpu_mcts.policy_network = MCTSPolicyNetwork(
+                input_size=gpu_mcts._calculate_state_size(),
+                hidden_size=parameters['policy_network_size'],
+                output_size=config.get('player_pool_size', 400)
+            ).to(DEVICE)
+        
+        # Update optimizers with new learning rate
+        if 'learning_rate' in parameters:
+            gpu_mcts.value_optimizer = optim.Adam(
+                gpu_mcts.value_network.parameters(), 
+                lr=parameters['learning_rate']
+            )
+            gpu_mcts.policy_optimizer = optim.Adam(
+                gpu_mcts.policy_network.parameters(), 
+                lr=parameters['learning_rate']
+            )
+        
+        return gpu_mcts
+    
+    return gpu_strategy_factory
 
 
 if __name__ == "__main__":
