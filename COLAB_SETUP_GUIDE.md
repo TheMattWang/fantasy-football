@@ -1,4 +1,15 @@
-# 🚀 Google Colab Setup Guide for Fantasy Football MCTS
+# 🚀 Google Colab Setup Guide for Fantasy Football MCTS (GPU Accelerated)
+
+## ⚡ **GPU Setup (Do This First!)**
+**For 3-5x faster performance, enable GPU:**
+1. In Colab: **Runtime → Change runtime type**
+2. **Hardware accelerator**: Select **T4 GPU** 
+3. **Runtime shape**: Standard
+4. Click **Save**
+
+**Performance Comparison:**
+- 🚀 **T4 GPU**: 1200 simulations/move, ~30s per draft
+- 📊 **CPU**: 400 simulations/move, ~90s per draft
 
 ## **Quick Start (3 Easy Steps)**
 
