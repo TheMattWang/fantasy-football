@@ -8,7 +8,8 @@ import os
 
 print("🔄 Loading data files...")
 
-# Global variables to store data
+# Declare global variables 
+global draft_board, adp_data, rookie_data, metadata
 draft_board = None
 adp_data = None
 rookie_data = None
@@ -44,11 +45,14 @@ try:
             print("💡 rookie_data_clean.csv not found (optional)")
         
         # Load model files if available
-        if os.path.exists('best_rookie_model.pkl'):
-            print(f"🤖 Found rookie prediction model: best_rookie_model.pkl")
-        elif os.path.exists('rookie_fantasy_model.pkl'):
-            print(f"🤖 Found rookie prediction model: rookie_fantasy_model.pkl")
-        else:
+        model_found = False
+        for model_name in ['best_rookie_model.pkl', 'rookie_fantasy_model.pkl', 'rookie_regressor.pkl']:
+            if os.path.exists(model_name):
+                print(f"🤖 Found rookie prediction model: {model_name}")
+                model_found = True
+                break
+        
+        if not model_found:
             print(f"📊 No rookie model found - will use position-based uncertainty")
         
         # Load your preferred settings

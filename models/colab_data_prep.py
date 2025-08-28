@@ -30,11 +30,14 @@ def prepare_colab_data():
         'rookie_data_clean.csv'
     ]
     
-    # 1.5. Copy model files if they exist
+    # 1.5. Copy model files if they exist (check multiple locations)
     model_files = [
         'best_rookie_model.pkl',
-        'rookie_fantasy_model.pkl',
-        'best_draft_strategy_model.pkl'
+        'rookie_fantasy_model.pkl', 
+        'best_draft_strategy_model.pkl',
+        'models/best_rookie_model.pkl',
+        'models/rookie_fantasy_model.pkl',
+        'model_weights/rookie_regressor.pkl'  # Found this one!
     ]
     
     for file in data_files:
@@ -52,9 +55,12 @@ def prepare_colab_data():
     for file in model_files:
         if os.path.exists(file):
             import shutil
-            shutil.copy(file, output_dir / file)
-            files_to_include.append(file)
-            print(f"✅ Copied model {file}")
+            # Extract just the filename for the destination
+            filename = os.path.basename(file)
+            destination = output_dir / filename
+            shutil.copy(file, destination)
+            files_to_include.append(filename)  # Only include the filename, not the path
+            print(f"✅ Copied model {file} -> {filename}")
         else:
             print(f"💡 {file} not found - run the respective notebook to generate it")
     
@@ -99,7 +105,8 @@ import os
 
 print("🔄 Loading data files...")
 
-# Global variables to store data
+# Declare global variables 
+global draft_board, adp_data, rookie_data, metadata
 draft_board = None
 adp_data = None
 rookie_data = None
@@ -135,11 +142,14 @@ try:
             print("💡 rookie_data_clean.csv not found (optional)")
         
         # Load model files if available
-        if os.path.exists('best_rookie_model.pkl'):
-            print(f"🤖 Found rookie prediction model: best_rookie_model.pkl")
-        elif os.path.exists('rookie_fantasy_model.pkl'):
-            print(f"🤖 Found rookie prediction model: rookie_fantasy_model.pkl")
-        else:
+        model_found = False
+        for model_name in ['best_rookie_model.pkl', 'rookie_fantasy_model.pkl', 'rookie_regressor.pkl']:
+            if os.path.exists(model_name):
+                print(f"🤖 Found rookie prediction model: {model_name}")
+                model_found = True
+                break
+        
+        if not model_found:
             print(f"📊 No rookie model found - will use position-based uncertainty")
         
         # Load your preferred settings
