@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Quick Draft Assistant - Simplified Interface with Basic Autocomplete
-===================================================================
+Autocomplete Draft Assistant - Enhanced with Tab Completion
+=========================================================
 
-A streamlined version of the draft assistant for easy real-time use.
-Just input picks as they happen and get instant MCTS recommendations.
-Includes basic autocomplete and fuzzy player name matching.
+Interactive draft assistant with smart autocomplete for player names.
+Uses readline for tab completion to eliminate typing errors.
 """
 
 import os
@@ -13,18 +12,35 @@ import sys
 import json
 import pandas as pd
 import numpy as np
+import readline
+import atexit
 from collections import Counter, defaultdict
 from pathlib import Path
 
-# Try to enable readline for better input experience
+# Configure readline for better autocomplete experience
 try:
     import readline
+    import rlcompleter
+    
+    # Enable tab completion
     readline.parse_and_bind("tab: complete")
+    
+    # History file for better UX
+    histfile = os.path.join(os.path.expanduser("~"), ".draft_assistant_history")
+    try:
+        readline.read_history_file(histfile)
+        readline.set_history_length(1000)
+    except FileNotFoundError:
+        pass
+    
+    atexit.register(readline.write_history_file, histfile)
+    
     READLINE_AVAILABLE = True
 except ImportError:
+    print("⚠️  Readline not available. Autocomplete will be limited.")
     READLINE_AVAILABLE = False
 
-# Simple player class for quick usage
+
 class Player:
     def __init__(self, name, position, team, vorp, bye_week=0, injury_risk=0.3):
         self.name = name
@@ -37,7 +53,106 @@ class Player:
     def __str__(self):
         return f"{self.name} ({self.position})"
 
-class QuickDraftAssistant:
+
+class PlayerCompleter:
+    """Custom completer for player names"""
+    
+    def __init__(self, players):
+        self.players = players
+        self.player_names = [p.name for p in players]
+        self.available_players = set(players)
+        
+        # Create name variations for better matching
+        self.name_variations = {}
+        for player in players:
+            name = player.name
+            
+            # Add full name
+            self.name_variations[name.lower()] = player
+            
+            # Add last name only
+            parts = name.split()
+            if len(parts) >= 2:
+                last_name = parts[-1]
+                self.name_variations[last_name.lower()] = player
+            
+            # Add first + last (skip middle names/suffixes)
+            if len(parts) >= 2:
+                first_last = f"{parts[0]} {parts[-1]}"
+                self.name_variations[first_last.lower()] = player
+            
+            # Add initials + last name
+            if len(parts) >= 2:
+                initials_last = f"{parts[0][0]}. {parts[-1]}"
+                self.name_variations[initials_last.lower()] = player
+    
+    def update_available_players(self, available_players):
+        """Update the list of available players for completion"""
+        self.available_players = available_players
+    
+    def get_matches(self, text):
+        """Get all matching player names for given text"""
+        text_lower = text.lower()
+        matches = []
+        
+        for player in self.available_players:
+            name_lower = player.name.lower()
+            
+            # Check if text matches start of name or any word in name
+            if (name_lower.startswith(text_lower) or 
+                any(word.startswith(text_lower) for word in name_lower.split())):
+                matches.append(player.name)
+        
+        return sorted(matches)
+    
+    def complete(self, text, state):
+        """Completion function for readline"""
+        if state == 0:
+            # First call - generate matches
+            self.matches = self.get_matches(text)
+        
+        try:
+            return self.matches[state]
+        except IndexError:
+            return None
+    
+    def find_player_by_text(self, text):
+        """Find player by text input (with fuzzy matching)"""
+        text_lower = text.lower().strip()
+        
+        # Try exact match first
+        for player in self.available_players:
+            if player.name.lower() == text_lower:
+                return player
+        
+        # Try variation matches
+        if text_lower in self.name_variations:
+            player = self.name_variations[text_lower]
+            if player in self.available_players:
+                return player
+        
+        # Try partial matches
+        matches = []
+        for player in self.available_players:
+            name_lower = player.name.lower()
+            if (text_lower in name_lower or 
+                any(text_lower in word for word in name_lower.split())):
+                matches.append(player)
+        
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            # Multiple matches - show options
+            print(f"\n🔍 Multiple players match '{text}':")
+            for i, player in enumerate(matches[:10], 1):
+                print(f"  {i}. {player.name} ({player.position}) - VORP: {player.vorp:.1f}")
+            print("Please be more specific or use tab completion.")
+            return None
+        
+        return None
+
+
+class AutocompleteDraftAssistant:
     def __init__(self, your_team_position=6):
         self.your_team_position = your_team_position
         self.players = self.load_players()
@@ -47,14 +162,19 @@ class QuickDraftAssistant:
         self.current_pick = 1
         self.pick_history = []
         
-        print("🏈 Quick Fantasy Football Draft Assistant")
-        print("=" * 45)
+        # Setup autocomplete
+        self.completer = PlayerCompleter(self.players)
+        if READLINE_AVAILABLE:
+            readline.set_completer(self.completer.complete)
+            readline.set_completer_delims(' \t\n')
+        
+        print("🏈 Autocomplete Fantasy Football Draft Assistant")
+        print("=" * 50)
         print(f"✅ Loaded {len(self.players)} players")
         print(f"🎯 Your team picks at position #{your_team_position}")
         if READLINE_AVAILABLE:
-            print("⌨️  Basic autocomplete enabled (use arrow keys for history)")
-        print("🔍 Smart name matching: try last names or partial names")
-        print("📋 Type 'help' for commands or just start entering picks!")
+            print("⌨️  Tab completion enabled - press TAB to autocomplete player names!")
+        print("📋 Type 'help' for commands or start entering picks!")
         print()
     
     def load_players(self):
@@ -99,121 +219,86 @@ class QuickDraftAssistant:
         return self.create_sample_players()
     
     def create_sample_players(self):
-        """Create sample player data"""
+        """Create sample player data with realistic names"""
         players = []
-        positions = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']
+        
+        # Sample realistic player names by position
+        sample_names = {
+            'QB': ['Josh Allen', 'Patrick Mahomes', 'Lamar Jackson', 'Joe Burrow', 'Justin Herbert',
+                   'Dak Prescott', 'Russell Wilson', 'Kirk Cousins', 'Derek Carr', 'Tua Tagovailoa'],
+            'RB': ['Christian McCaffrey', 'Saquon Barkley', 'Derrick Henry', 'Alvin Kamara', 'Nick Chubb',
+                   'Austin Ekeler', 'Jonathan Taylor', 'Dalvin Cook', 'Aaron Jones', 'Josh Jacobs'],
+            'WR': ['Cooper Kupp', 'Davante Adams', 'Tyreek Hill', 'Stefon Diggs', 'DeAndre Hopkins',
+                   'Mike Evans', 'Keenan Allen', 'DK Metcalf', 'CeeDee Lamb', 'A.J. Brown'],
+            'TE': ['Travis Kelce', 'Mark Andrews', 'George Kittle', 'Darren Waller', 'Kyle Pitts',
+                   'T.J. Hockenson', 'Dallas Goedert', 'Pat Freiermuth', 'Tyler Higbee', 'Noah Fant'],
+            'K': ['Justin Tucker', 'Harrison Butker', 'Daniel Carlson', 'Tyler Bass', 'Matt Gay',
+                  'Ryan McManus', 'Nick Folk', 'Mason Crosby', 'Greg Zuerlein', 'Evan McPherson'],
+            'DEF': ['Buffalo Bills', 'Pittsburgh Steelers', 'New England Patriots', 'Tampa Bay Buccaneers',
+                    'Dallas Cowboys', 'San Francisco 49ers', 'Los Angeles Rams', 'Green Bay Packers',
+                    'Indianapolis Colts', 'New Orleans Saints']
+        }
+        
         teams = ['ARI', 'ATL', 'BAL', 'BUF', 'CAR', 'CHI', 'CIN', 'CLE', 
                 'DAL', 'DEN', 'DET', 'GB', 'HOU', 'IND', 'JAX', 'KC',
                 'LV', 'LAC', 'LAR', 'MIA', 'MIN', 'NE', 'NO', 'NYG',
                 'NYJ', 'PHI', 'PIT', 'SF', 'SEA', 'TB', 'TEN', 'WAS']
         
-        for i in range(300):
-            pos = positions[i % len(positions)]
-            team = teams[i % len(teams)]
-            
-            # Generate realistic VORP based on position and draft order
-            if pos == 'QB':
-                base_vorp = max(0, 18 - i * 0.15)
-            elif pos in ['RB', 'WR']:
-                base_vorp = max(0, 15 - i * 0.12)
-            elif pos == 'TE':
-                base_vorp = max(0, 8 - i * 0.08)
-            else:  # K, DEF
-                base_vorp = max(0, 5 - i * 0.05)
-            
-            vorp = base_vorp + np.random.normal(0, 1)
-            bye_week = np.random.choice(range(4, 15))
-            injury_risk = np.random.beta(2, 5)  # Skewed toward lower risk
-            
-            player = Player(
-                name=f"{pos}_{team}_{i//6 + 1}",
-                position=pos,
-                team=team,
-                vorp=vorp,
-                bye_week=bye_week,
-                injury_risk=injury_risk
-            )
-            players.append(player)
+        for pos, names in sample_names.items():
+            for i, name in enumerate(names):
+                # Generate realistic VORP based on position and ranking
+                if pos == 'QB':
+                    vorp = max(0, 20 - i * 1.5)
+                elif pos in ['RB', 'WR']:
+                    vorp = max(0, 18 - i * 1.2)
+                elif pos == 'TE':
+                    vorp = max(0, 12 - i * 0.8)
+                else:  # K, DEF
+                    vorp = max(0, 8 - i * 0.5)
+                
+                vorp += np.random.normal(0, 0.5)  # Add some randomness
+                
+                bye_week = np.random.choice(range(4, 15))
+                injury_risk = np.random.beta(2, 5)
+                team = teams[i % len(teams)]
+                
+                player = Player(name, pos, team, vorp, bye_week, injury_risk)
+                players.append(player)
         
         return players
     
-    def find_player(self, name_query):
-        """Find player by name (smart fuzzy matching)"""
-        name_query = name_query.lower().strip()
-        
-        # Exact match first
-        for player in self.available_players:
-            if player.name.lower() == name_query:
-                return player
-        
-        # Try last name only
-        query_parts = name_query.split()
-        if len(query_parts) >= 1:
-            last_name_query = query_parts[-1]
-            last_name_matches = []
-            for player in self.available_players:
-                player_parts = player.name.lower().split()
-                if len(player_parts) >= 1 and player_parts[-1] == last_name_query:
-                    last_name_matches.append(player)
-            
-            if len(last_name_matches) == 1:
-                return last_name_matches[0]
-        
-        # Partial match - any word starts with query
-        word_matches = []
-        for player in self.available_players:
-            name_words = player.name.lower().split()
-            if any(word.startswith(name_query) for word in name_words):
-                word_matches.append(player)
-        
-        if len(word_matches) == 1:
-            return word_matches[0]
-        elif len(word_matches) > 1:
-            # Sort by VORP and show top matches
-            word_matches.sort(key=lambda p: p.vorp, reverse=True)
-            print(f"🔍 Multiple matches found for '{name_query}' (showing top 5):")
-            for i, player in enumerate(word_matches[:5], 1):
-                print(f"  {i}. {player.name} ({player.position}) - VORP: {player.vorp:.1f}")
-            
-            # Try to auto-select if there's a clear best option
-            if word_matches[0].vorp > word_matches[1].vorp + 5:
-                print(f"🎯 Auto-selecting best match: {word_matches[0].name}")
-                return word_matches[0]
-            return None
-        
-        # Contains match as fallback
-        contains_matches = []
-        for player in self.available_players:
-            if name_query in player.name.lower():
-                contains_matches.append(player)
-        
-        if len(contains_matches) == 1:
-            return contains_matches[0]
-        elif len(contains_matches) > 1:
-            contains_matches.sort(key=lambda p: p.vorp, reverse=True)
-            print(f"🔍 Partial matches found for '{name_query}' (showing top 3):")
-            for i, player in enumerate(contains_matches[:3], 1):
-                print(f"  {i}. {player.name} ({player.position}) - VORP: {player.vorp:.1f}")
-            return None
+    def smart_input(self, prompt):
+        """Get input with autocomplete support"""
+        if READLINE_AVAILABLE:
+            return input(prompt)
         else:
-            print(f"❌ No player found matching '{name_query}'")
-            print("💡 Try:")
-            print("   - Just the last name (e.g., 'McCaffrey')")
-            print("   - First few letters (e.g., 'Josh' for Josh Allen)")
-            print("   - Use 'search <name>' to find players")
-            return None
+            # Fallback for systems without readline
+            return input(prompt)
     
-    def record_pick(self, player_name, team_position=None):
-        """Record a draft pick"""
+    def find_player_interactive(self, name_query):
+        """Find player with interactive help for multiple matches"""
+        return self.completer.find_player_by_text(name_query)
+    
+    def record_pick(self, player_input, team_position=None):
+        """Record a draft pick with autocomplete support"""
         if team_position is None:
             team_position = self.get_current_picking_team()
         
-        player = self.find_player(player_name)
+        # Handle team number at end of input
+        parts = player_input.strip().split()
+        if len(parts) >= 2 and parts[-1].isdigit():
+            team_position = int(parts[-1])
+            player_name = " ".join(parts[:-1])
+        else:
+            player_name = player_input.strip()
+        
+        player = self.find_player_interactive(player_name)
         if not player:
             return False
         
         # Record the pick
         self.available_players.remove(player)
+        self.completer.update_available_players(self.available_players)
         self.team_rosters[team_position].append(player)
         
         pick_info = {
@@ -299,26 +384,26 @@ class QuickDraftAssistant:
         recs = self.get_recommendations(count)
         
         print(f"\n🤖 TOP {count} RECOMMENDATIONS:")
-        print("-" * 45)
+        print("-" * 50)
         
         for i, (player, score) in enumerate(recs, 1):
             risk_indicator = "🔴" if player.injury_risk > 0.6 else "🟡" if player.injury_risk > 0.4 else "🟢"
             bye_text = f"Bye: {player.bye_week}" if player.bye_week > 0 else "Bye: --"
             
-            print(f"{i}. {player.name:20s} | {player.position:3s} | Score: {score:5.1f} | {bye_text} | {risk_indicator}")
+            print(f"{i}. {player.name:25s} | {player.position:3s} | Score: {score:5.1f} | {bye_text} | {risk_indicator}")
     
     def show_roster(self):
         """Show current roster"""
         our_roster = self.team_rosters[self.your_team_position]
         
         print(f"\n🟢 YOUR ROSTER ({len(our_roster)}/15):")
-        print("-" * 45)
+        print("-" * 50)
         
         if our_roster:
             for i, player in enumerate(our_roster, 1):
                 bye_text = f"Bye: {player.bye_week}" if player.bye_week > 0 else "Bye: --"
                 risk_indicator = "🔴" if player.injury_risk > 0.6 else "🟡" if player.injury_risk > 0.4 else "🟢"
-                print(f"{i:2d}. {player.name:20s} | {player.position:3s} | VORP: {player.vorp:5.1f} | {bye_text} | {risk_indicator}")
+                print(f"{i:2d}. {player.name:25s} | {player.position:3s} | VORP: {player.vorp:5.1f} | {bye_text} | {risk_indicator}")
         else:
             print("  (No picks yet)")
         
@@ -327,7 +412,7 @@ class QuickDraftAssistant:
         print(f"\n📊 POSITIONS: QB:{position_counts.get('QB',0)} RB:{position_counts.get('RB',0)} WR:{position_counts.get('WR',0)} TE:{position_counts.get('TE',0)} K:{position_counts.get('K',0)} DEF:{position_counts.get('DEF',0)}")
     
     def search_players(self, query, position=None, count=10):
-        """Search available players"""
+        """Search available players with autocomplete support"""
         query = query.lower() if query else ""
         results = []
         
@@ -346,11 +431,11 @@ class QuickDraftAssistant:
         results.sort(key=lambda p: p.vorp, reverse=True)
         
         print(f"\n🔍 SEARCH RESULTS: '{query}'" + (f" (Position: {position})" if position else ""))
-        print("-" * 45)
+        print("-" * 50)
         
         for i, player in enumerate(results[:count], 1):
             bye_text = f"Bye: {player.bye_week}" if player.bye_week > 0 else "Bye: --"
-            print(f"{i:2d}. {player.name:20s} | {player.position:3s} | VORP: {player.vorp:5.1f} | {bye_text}")
+            print(f"{i:2d}. {player.name:25s} | {player.position:3s} | VORP: {player.vorp:5.1f} | {bye_text}")
     
     def undo_last_pick(self):
         """Undo the last pick"""
@@ -364,6 +449,7 @@ class QuickDraftAssistant:
         
         # Return player to available pool
         self.available_players.add(player)
+        self.completer.update_available_players(self.available_players)
         self.team_rosters[team].remove(player)
         
         # Reset counters
@@ -390,32 +476,33 @@ class QuickDraftAssistant:
 
 def main():
     """Main interactive loop"""
-    print("🚀 Starting Quick Draft Assistant...")
+    print("🚀 Starting Autocomplete Draft Assistant...")
     
-    # Get your draft position - with timeout fallback
-    position = 6  # Default position
+    # Get your draft position - with fallback
+    position = 6
     
     try:
-        import sys
-        if sys.stdin.isatty():  # Only prompt if running interactively
+        if sys.stdin.isatty():
             user_input = input("What's your draft position? (1-12) [default: 6]: ").strip()
             if user_input:
                 position = int(user_input)
     except (ValueError, EOFError, KeyboardInterrupt):
         print(f"Using default position: {position}")
     except:
-        pass  # Use default if any other issues
+        pass
     
-    assistant = QuickDraftAssistant(position)
+    assistant = AutocompleteDraftAssistant(position)
     
-    print("\n🎯 QUICK COMMANDS:")
-    print("  <player_name>         - Record a pick (auto-detects current team)")
+    print("\n🎯 AUTOCOMPLETE COMMANDS:")
+    print("  <player_name>         - Record pick (use TAB to autocomplete!)")
     print("  <player_name> <team>  - Record pick for specific team")
     print("  recs                  - Show recommendations") 
     print("  roster                - Show your roster")
-    print("  search <query>        - Search players")
+    print("  search <query>        - Search players (try typing partial names)")
     print("  undo                  - Undo last pick")
     print("  quit                  - Exit")
+    if READLINE_AVAILABLE:
+        print("\n⌨️  PRO TIP: Press TAB while typing player names for autocomplete!")
     print()
     
     while True:
@@ -423,12 +510,12 @@ def main():
             # Show current status
             assistant.show_status()
             
-            # Get command
+            # Get command with autocomplete
             current_team = assistant.get_current_picking_team()
             is_our_turn = current_team == assistant.your_team_position
             prompt = f"\n🎯 R{assistant.current_round}.{assistant.current_pick} Team {current_team}" + (" (YOUR TURN)" if is_our_turn else "") + " > "
             
-            command = input(prompt).strip()
+            command = assistant.smart_input(prompt).strip()
             
             if not command:
                 continue
@@ -453,26 +540,20 @@ def main():
                 assistant.undo_last_pick()
             
             elif parts[0].lower() == 'help':
-                print("\n🎯 QUICK COMMANDS:")
-                print("  <player_name>         - Record a pick (auto-detects current team)")
+                print("\n🎯 AUTOCOMPLETE COMMANDS:")
+                print("  <player_name>         - Record pick (use TAB to autocomplete!)")
                 print("  <player_name> <team>  - Record pick for specific team")
                 print("  recs                  - Show recommendations")
                 print("  roster                - Show your roster")
                 print("  search <query>        - Search players")
                 print("  undo                  - Undo last pick")
                 print("  quit                  - Exit")
+                if READLINE_AVAILABLE:
+                    print("\n⌨️  PRO TIP: Press TAB while typing player names for autocomplete!")
             
             else:
                 # Assume it's a player pick
-                if len(parts) >= 2 and parts[-1].isdigit():
-                    # Player name + team number
-                    player_name = " ".join(parts[:-1])
-                    team_num = int(parts[-1])
-                    assistant.record_pick(player_name, team_num)
-                else:
-                    # Just player name - use current team
-                    player_name = command
-                    assistant.record_pick(player_name)
+                assistant.record_pick(command)
         
         except KeyboardInterrupt:
             print("\n👋 Good luck with your draft!")
