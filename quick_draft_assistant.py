@@ -24,6 +24,14 @@ try:
 except ImportError:
     READLINE_AVAILABLE = False
 
+# Import league validation
+try:
+    from league_validator import LeagueConfig, LeagueValidator, create_standard_12_team_config
+    LEAGUE_VALIDATOR_AVAILABLE = True
+except ImportError:
+    print("⚠️  League validator not available. Using basic validation.")
+    LEAGUE_VALIDATOR_AVAILABLE = False
+
 # Simple player class for quick usage
 class Player:
     def __init__(self, name, position, team, vorp, bye_week=0, injury_risk=0.3):
@@ -38,11 +46,34 @@ class Player:
         return f"{self.name} ({self.position})"
 
 class QuickDraftAssistant:
-    def __init__(self, your_team_position=6):
+    def __init__(self, your_team_position=6, league_config=None):
         self.your_team_position = your_team_position
+        
+        # Initialize league configuration
+        if league_config is None:
+            if LEAGUE_VALIDATOR_AVAILABLE:
+                self.league_config = create_standard_12_team_config()
+            else:
+                # Fallback configuration
+                self.league_config = type('Config', (), {
+                    'teams': 12, 'rounds': 15, 'draft_type': 'snake'
+                })()
+        else:
+            self.league_config = league_config
+        
+        # Initialize league validator
+        if LEAGUE_VALIDATOR_AVAILABLE:
+            self.validator = LeagueValidator(self.league_config)
+        else:
+            self.validator = None
+        
+        # Validate team position
+        if not (1 <= your_team_position <= self.league_config.teams):
+            raise ValueError(f"Team position must be 1-{self.league_config.teams}, got {your_team_position}")
+        
         self.players = self.load_players()
         self.available_players = set(self.players)
-        self.team_rosters = {i: [] for i in range(1, 13)}
+        self.team_rosters = {i: [] for i in range(1, self.league_config.teams + 1)}
         self.current_round = 1
         self.current_pick = 1
         self.pick_history = []
@@ -50,11 +81,19 @@ class QuickDraftAssistant:
         print("🏈 Quick Fantasy Football Draft Assistant")
         print("=" * 45)
         print(f"✅ Loaded {len(self.players)} players")
+        print(f"🏈 League: {self.league_config.teams} teams, {self.league_config.rounds} rounds ({self.league_config.draft_type} draft)")
         print(f"🎯 Your team picks at position #{your_team_position}")
         if READLINE_AVAILABLE:
             print("⌨️  Basic autocomplete enabled (use arrow keys for history)")
         print("🔍 Smart name matching: try last names or partial names")
         print("📋 Type 'help' for commands or just start entering picks!")
+        
+        # Show any validation warnings
+        if self.validator and self.validator.errors:
+            print("⚠️  League configuration warnings:")
+            for error in self.validator.errors:
+                print(f"   • {error}")
+        
         print()
     
     def load_players(self):
@@ -204,9 +243,19 @@ class QuickDraftAssistant:
             return None
     
     def record_pick(self, player_name, team_position=None):
-        """Record a draft pick"""
+        """Record a draft pick with validation"""
         if team_position is None:
             team_position = self.get_current_picking_team()
+        
+        # Validate team position
+        if not (1 <= team_position <= self.league_config.teams):
+            print(f"❌ Invalid team position: {team_position}. Must be 1-{self.league_config.teams}")
+            return False
+        
+        # Validate current draft state
+        if self.validator and self.validator.is_draft_complete(self.current_round, self.current_pick):
+            print(f"❌ Draft is complete! All {self.league_config.rounds} rounds finished.")
+            return False
         
         player = self.find_player(player_name)
         if not player:
@@ -224,24 +273,40 @@ class QuickDraftAssistant:
         }
         self.pick_history.append(pick_info)
         
-        # Display the pick
+        # Display the pick with validation info
         team_indicator = "🟢 YOUR PICK" if team_position == self.your_team_position else f"Team {team_position}"
-        print(f"📝 R{self.current_round}.{self.current_pick:02d} | {team_indicator} | {player.name} ({player.position}) | VORP: {player.vorp:.1f}")
+        if self.validator:
+            overall_pick = self.validator.get_overall_pick_number(self.current_round, self.current_pick)
+            print(f"📝 R{self.current_round}.{self.current_pick:02d} (#{overall_pick:03d}) | {team_indicator} | {player.name} ({player.position}) | VORP: {player.vorp:.1f}")
+        else:
+            print(f"📝 R{self.current_round}.{self.current_pick:02d} | {team_indicator} | {player.name} ({player.position}) | VORP: {player.vorp:.1f}")
         
         # Advance to next pick
-        self.current_pick += 1
-        if self.current_pick > 12:
-            self.current_pick = 1
-            self.current_round += 1
+        self.advance_pick()
         
         return True
     
+    def advance_pick(self):
+        """Advance to next pick with validation"""
+        if self.validator:
+            self.current_round, self.current_pick = self.validator.get_next_pick(self.current_round, self.current_pick)
+        else:
+            # Fallback logic
+            self.current_pick += 1
+            if self.current_pick > self.league_config.teams:
+                self.current_pick = 1
+                self.current_round += 1
+    
     def get_current_picking_team(self):
-        """Get which team is currently picking (snake draft)"""
-        if self.current_round % 2 == 1:  # Odd rounds: 1, 2, 3...
-            return self.current_pick
-        else:  # Even rounds: 12, 11, 10...
-            return 13 - self.current_pick
+        """Get which team is currently picking (uses validator if available)"""
+        if self.validator:
+            return self.validator.get_current_picking_team(self.current_round, self.current_pick)
+        else:
+            # Fallback logic for snake draft
+            if self.current_round % 2 == 1:  # Odd rounds: 1, 2, 3...
+                return self.current_pick
+            else:  # Even rounds: reverse order
+                return self.league_config.teams - self.current_pick + 1
     
     def get_recommendations(self, count=5):
         """Get top recommendations based on team needs and player value"""
@@ -353,7 +418,7 @@ class QuickDraftAssistant:
             print(f"{i:2d}. {player.name:20s} | {player.position:3s} | VORP: {player.vorp:5.1f} | {bye_text}")
     
     def undo_last_pick(self):
-        """Undo the last pick"""
+        """Undo the last pick with validation"""
         if not self.pick_history:
             print("❌ No picks to undo")
             return False
@@ -366,31 +431,75 @@ class QuickDraftAssistant:
         self.available_players.add(player)
         self.team_rosters[team].remove(player)
         
-        # Reset counters
-        self.current_pick -= 1
-        if self.current_pick < 1:
-            self.current_pick = 12
-            self.current_round -= 1
+        # Reset counters to the undone pick
+        self.current_round = last_pick['round']
+        self.current_pick = last_pick['pick']
         
-        print(f"↩️  Undid: {player.name}")
+        print(f"↩️  Undid: {player.name} (back to R{self.current_round}.{self.current_pick:02d})")
         return True
     
     def show_status(self):
-        """Show current draft status"""
+        """Show current draft status with validation"""
         current_team = self.get_current_picking_team()
         is_our_turn = current_team == self.your_team_position
         
         print(f"\n🎯 DRAFT STATUS")
-        print(f"Round: {self.current_round} | Pick: {self.current_pick}")
+        if self.validator:
+            overall_pick = self.validator.get_overall_pick_number(self.current_round, self.current_pick)
+            total_picks = self.league_config.total_picks
+            print(f"Round: {self.current_round}/{self.league_config.rounds} | Pick: {self.current_pick}/{self.league_config.teams} | Overall: #{overall_pick}/{total_picks}")
+            
+            # Show picks until our turn
+            if not is_our_turn:
+                picks_until = self.validator.get_picks_until_turn(self.current_round, self.current_pick, self.your_team_position)
+                if picks_until > 0:
+                    print(f"📊 Picks until your turn: {picks_until}")
+        else:
+            print(f"Round: {self.current_round} | Pick: {self.current_pick}")
+        
         print(f"Now picking: Team {current_team}" + (" (🟢 YOUR TURN!)" if is_our_turn else ""))
         
+        # Check if draft is complete
+        if self.validator and self.validator.is_draft_complete(self.current_round, self.current_pick):
+            print("🏆 DRAFT COMPLETE! All rounds finished.")
+            
+            # Show roster validation for our team
+            our_roster = self.team_rosters[self.your_team_position]
+            roster_errors = self.validator.validate_roster_composition(our_roster)
+            if roster_errors:
+                print("⚠️  Roster issues:")
+                for error in roster_errors:
+                    print(f"   • {error}")
+            else:
+                print("✅ Your roster meets all requirements!")
+        
         self.show_roster()
-        self.show_recommendations()
+        if not (self.validator and self.validator.is_draft_complete(self.current_round, self.current_pick)):
+            self.show_recommendations()
 
 
 def main():
     """Main interactive loop"""
     print("🚀 Starting Quick Draft Assistant...")
+    
+    # Check for custom league configuration
+    league_config = None
+    if LEAGUE_VALIDATOR_AVAILABLE:
+        try:
+            if sys.stdin.isatty():
+                custom_league = input("Use custom league settings? (y/N): ").strip().lower()
+                if custom_league in ['y', 'yes']:
+                    from league_validator import create_league_config_from_input
+                    league_config = create_league_config_from_input()
+                else:
+                    league_config = create_standard_12_team_config()
+            else:
+                league_config = create_standard_12_team_config()
+        except (EOFError, KeyboardInterrupt):
+            league_config = create_standard_12_team_config()
+    
+    # Get team count for position validation
+    max_teams = league_config.teams if league_config else 12
     
     # Get your draft position - with timeout fallback
     position = 6  # Default position
@@ -398,15 +507,18 @@ def main():
     try:
         import sys
         if sys.stdin.isatty():  # Only prompt if running interactively
-            user_input = input("What's your draft position? (1-12) [default: 6]: ").strip()
+            user_input = input(f"What's your draft position? (1-{max_teams}) [default: 6]: ").strip()
             if user_input:
                 position = int(user_input)
+                if not (1 <= position <= max_teams):
+                    print(f"⚠️  Position {position} invalid for {max_teams}-team league. Using position 6.")
+                    position = min(6, max_teams)
     except (ValueError, EOFError, KeyboardInterrupt):
         print(f"Using default position: {position}")
     except:
         pass  # Use default if any other issues
     
-    assistant = QuickDraftAssistant(position)
+    assistant = QuickDraftAssistant(position, league_config)
     
     print("\n🎯 QUICK COMMANDS:")
     print("  <player_name>         - Record a pick (auto-detects current team)")

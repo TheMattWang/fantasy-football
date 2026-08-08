@@ -1,19 +1,16 @@
+"""Evaluation for fantasy football draft strategies.
+
+``replay`` supersedes ``backtesting``. The old harness scored strategies with
+``0.35 * total_vorp`` -- the same quantity the agent maximized -- so it could
+not detect a bad board, a bad objective, or a bad opponent model. It is also
+downstream of ``hyperparameter_search``, which tuned coefficients against that
+score and never completed a single trial (``best_score: -Infinity``).
+
+Neither is imported here any more: they pull in matplotlib and, more to the
+point, importing them invites using them. They remain on disk for reference and
+are scheduled for deletion.
 """
-Evaluation and backtesting modules for fantasy football draft strategies.
 
-This module provides comprehensive evaluation tools including:
-- Historical draft backtesting
-- Hyperparameter optimization
-- Strategy comparison
-- Performance metrics
-"""
+from .replay import replay_season, summarize
 
-from .backtesting import DraftBacktester, BacktestResults
-from .hyperparameter_search import HyperparameterOptimizer, ParameterGrid
-from .metrics import DraftMetrics, SeasonPerformanceEvaluator
-
-__all__ = [
-    'DraftBacktester', 'BacktestResults',
-    'HyperparameterOptimizer', 'ParameterGrid', 
-    'DraftMetrics', 'SeasonPerformanceEvaluator'
-]
+__all__ = ["replay_season", "summarize"]

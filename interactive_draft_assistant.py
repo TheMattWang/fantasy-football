@@ -26,7 +26,10 @@ import numpy as np
 from collections import defaultdict, Counter
 
 # Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
 sys.path.append(str(Path(__file__).parent / "src"))
+
+from src.data.assertions import validate_board, validate_players
 
 try:
     from src.core.player import Player, PlayerPool
@@ -49,6 +52,23 @@ except ImportError:
             if self.metadata is None:
                 self.metadata = {}
 
+def _player_rank_key(player):
+    """Deterministic ordering for players: best VORP first, ties broken by ADP then name.
+
+    available_players is a set and Player.__hash__ is hash(name), which Python
+    randomizes per process. Without an explicit tie-break, any scoring bug that
+    flattens scores makes the top recommendation depend on the hash seed.
+    """
+    return (-getattr(player, 'vorp', 0.0),
+            getattr(player, 'adp_rank', 999.0),
+            player.name)
+
+
+def _scored_rank_key(player, score):
+    """Deterministic ordering for (player, score) pairs. Highest score first."""
+    return (-score, getattr(player, 'adp_rank', 999.0), player.name)
+
+
 # Try to import PyTorch for model loading
 try:
     import torch
@@ -57,6 +77,24 @@ try:
 except ImportError:
     print("⚠️  PyTorch not available. Model recommendations will use fallback logic.")
     TORCH_AVAILABLE = False
+
+    # The network classes below subclass nn.Module, and several signatures
+    # annotate torch.Tensor -- both are evaluated at import time. Without
+    # stand-ins the module fails to import entirely instead of degrading to the
+    # VORP fallback. Draft day must not depend on torch being installed.
+    class _Missing:
+        """Stands in for torch/torch.nn; raises only if actually used."""
+
+        class Module:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("PyTorch is not installed")
+
+        Tensor = object
+
+        def __getattr__(self, name):
+            raise RuntimeError(f"PyTorch is not installed (needed for {name!r})")
+
+    torch = nn = _Missing()
 
 
 class MCTSValueNetwork(nn.Module):
@@ -189,7 +227,7 @@ class TrainedMCTSModel:
             
             # Top available players (50 players × 5 features)
             available_list = list(draft_state.available_players)
-            top_available = sorted(available_list, key=lambda p: p.vorp, reverse=True)[:50]
+            top_available = sorted(available_list, key=_player_rank_key)[:50]
             
             player_features = []
             for i in range(50):
@@ -276,7 +314,7 @@ class TrainedMCTSModel:
                 player_scores.append((player, total_score))
             
             # Sort by score and return top-k
-            player_scores.sort(key=lambda x: x[1], reverse=True)
+            player_scores.sort(key=lambda x: _scored_rank_key(x[0], x[1]))
             return player_scores[:top_k]
             
         except Exception as e:
@@ -303,7 +341,7 @@ class TrainedMCTSModel:
             
             scored_players.append((player, score))
         
-        scored_players.sort(key=lambda x: x[1], reverse=True)
+        scored_players.sort(key=lambda x: _scored_rank_key(x[0], x[1]))
         return scored_players[:top_k]
     
     def _calculate_position_bonus(self, player: Player, roster: List[Player]) -> float:
@@ -392,25 +430,35 @@ class InteractiveDraftAssistant:
                 try:
                     df = pd.read_csv(file_path)
                     print(f"📊 Loading data from {file_path}")
-                    
+
+                    # Fails loudly if the board is structurally broken.
+                    validate_board(df)
+
                     for _, row in df.iterrows():
                         metadata = {}
                         
                         # Extract metadata fields
                         for col in df.columns:
-                            if col not in ['player_name', 'position', 'team', 'vorp']:
+                            if col not in ['player_name', 'position', 'team', 'vorp', 'VORP', 'adp_rank']:
                                 metadata[col] = row[col] if pd.notna(row[col]) else None
-                        
+
+                        # NOTE: the board CSV column is 'VORP' (uppercase). Series.get is
+                        # case-sensitive, so reading only 'vorp' silently zeroes every player.
+                        vorp = row.get('vorp', row.get('VORP', 0.0))
+                        adp = row.get('adp_rank', row.get('ADP', 999.0))
+
                         player = Player(
                             name=row.get('player_name', row.get('name', f"Player_{len(players)}")),
                             position=row.get('position', 'UNKNOWN'),
                             team=row.get('team', 'UNKNOWN'),
-                            vorp=float(row.get('vorp', 0.0)),
+                            vorp=float(vorp) if pd.notna(vorp) else 0.0,
+                            adp_rank=float(adp) if pd.notna(adp) else 999.0,
                             metadata=metadata
                         )
                         
                         players.append(player)
-                    
+
+                    validate_players(players)
                     return players
                     
                 except Exception as e:
@@ -609,9 +657,9 @@ class InteractiveDraftAssistant:
         if query:
             available = [p for p in available if query.lower() in p.name.lower()]
         
-        # Sort by VORP
-        available.sort(key=lambda p: p.vorp, reverse=True)
-        
+        # Sort by VORP (deterministic: ties break on ADP, then name)
+        available.sort(key=_player_rank_key)
+
         return available[:top_k]
     
     def undo_last_pick(self):

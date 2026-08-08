@@ -20,3 +20,21 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Virtualenv
+.venv/
+venv/
+
+# Secrets — Yahoo OAuth consumer key/secret and cached access tokens.
+.env
+*.env
+!.env.example
+private.json
+token.json
+
+# Caches and large derived artifacts (rebuildable; see src/data/paths.py)
+data/cache/
+*.npy
+
+# macOS
+.DS_Store

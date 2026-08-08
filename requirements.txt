@@ -1,0 +1,21 @@
+# Fantasy draft agent v2
+#
+# Deliberately no torch. The 2025 "GPU MCTS trainer" never trained anything
+# (its policy loss was literally torch.tensor(0.0)), and the season simulation
+# this replaces it with is a 54 MB numpy array evaluated in ~0.3 ms. There is
+# no GPU-scale problem here.
+#
+# numpy is pinned <2 because several wheels in this stack still ship
+# NumPy-1.x-compiled extensions.
+
+pandas>=2.0
+numpy>=1.24,<2
+scipy>=1.10
+scikit-learn>=1.3
+pyarrow>=14           # nflverse parquet releases
+requests>=2.31
+lxml>=5.0             # pandas.read_html
+rapidfuzz>=3.0        # player-name joins
+yfpy>=16              # Yahoo Fantasy Sports API
+python-dotenv>=1.0
+pytest>=8.0

@@ -17,6 +17,9 @@ import atexit
 from collections import Counter, defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from src.data.assertions import validate_board, validate_players
+
 # Configure readline for better autocomplete experience
 try:
     import readline
@@ -42,16 +45,32 @@ except ImportError:
 
 
 class Player:
-    def __init__(self, name, position, team, vorp, bye_week=0, injury_risk=0.3):
+    def __init__(self, name, position, team, vorp, bye_week=0, injury_risk=0.3, adp_rank=999.0):
         self.name = name
-        self.position = position  
+        self.position = position
         self.team = team
-        self.vorp = float(vorp)
-        self.bye_week = int(bye_week) if bye_week else 0
-        self.injury_risk = float(injury_risk) if injury_risk else 0.3
-    
+        self.vorp = float(vorp) if pd.notna(vorp) else 0.0
+        self.bye_week = int(bye_week) if bye_week and pd.notna(bye_week) else 0
+        self.injury_risk = float(injury_risk) if injury_risk and pd.notna(injury_risk) else 0.3
+        self.adp_rank = float(adp_rank) if pd.notna(adp_rank) else 999.0
+
     def __str__(self):
         return f"{self.name} ({self.position})"
+
+
+def rank_key(player):
+    """Deterministic player ordering: best VORP first, ties on ADP then name.
+
+    available_players is a set keyed on hash(name), which Python randomizes per
+    process. Without an explicit tie-break, a scoring bug that flattens scores
+    makes the top recommendation depend on the hash seed rather than on football.
+    """
+    return (-player.vorp, player.adp_rank, player.name)
+
+
+def scored_rank_key(player, score):
+    """Deterministic ordering for (player, score) pairs. Highest score first."""
+    return (-score, player.adp_rank, player.name)
 
 
 class PlayerCompleter:
@@ -195,7 +214,11 @@ class AutocompleteDraftAssistant:
                 try:
                     df = pd.read_csv(file_path)
                     print(f"📊 Loading from {file_path}")
-                    
+
+                    # Fails loudly if the board is structurally broken (e.g. a
+                    # mis-cased VORP column zeroing every player).
+                    validate_board(df)
+
                     for _, row in df.iterrows():
                         # Handle different column names
                         name = row.get('player_name', row.get('name', row.get('Player', f"Player_{len(players)}")))
@@ -204,12 +227,14 @@ class AutocompleteDraftAssistant:
                         vorp = row.get('vorp', row.get('VORP', 0))
                         bye_week = row.get('bye_week', row.get('Bye', 0))
                         injury_risk = row.get('injury_risk_score', 0.3)
-                        
-                        player = Player(name, position, team, vorp, bye_week, injury_risk)
+                        adp_rank = row.get('adp_rank', row.get('ADP', row.get('Rank', 999)))
+
+                        player = Player(name, position, team, vorp, bye_week, injury_risk, adp_rank)
                         players.append(player)
-                    
+
+                    validate_players(players)
                     return players
-                    
+
                 except Exception as e:
                     print(f"⚠️  Could not load {file_path}: {e}")
                     continue
@@ -375,8 +400,8 @@ class AutocompleteDraftAssistant:
             
             player_scores.append((player, score))
         
-        # Sort by score and return top recommendations
-        player_scores.sort(key=lambda x: x[1], reverse=True)
+        # Sort by score and return top recommendations (deterministic tie-break)
+        player_scores.sort(key=lambda x: scored_rank_key(x[0], x[1]))
         return player_scores[:count]
     
     def show_recommendations(self, count=5):
@@ -428,7 +453,7 @@ class AutocompleteDraftAssistant:
             results.append(player)
         
         # Sort by VORP
-        results.sort(key=lambda p: p.vorp, reverse=True)
+        results.sort(key=rank_key)
         
         print(f"\n🔍 SEARCH RESULTS: '{query}'" + (f" (Position: {position})" if position else ""))
         print("-" * 50)
