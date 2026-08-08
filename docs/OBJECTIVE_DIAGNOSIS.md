@@ -53,21 +53,36 @@ Hand each channel perfect information separately.
 
 plus arm5, `need_adp` drafting off realized value — the pure valuation ceiling.
 
-| arm | gain vs `need_adp` | se | t |
-|---|---|---|---|
-| arm1 projections + `need_adp` | −3.632 | 0.983 | −3.69 |
-| arm2 **hindsight objective** | **+2.950** | 0.564 | +5.23 |
-| arm3 hindsight continuation | −2.368 | 1.122 | −2.11 |
-| arm4 both | **+3.211** | 0.516 | +6.22 |
-| arm5 greedy on realized value | +2.714 | 0.586 | +4.63 |
+Final, n=32 paired drafts per arm:
 
-1. **The objective is the problem.** Fixing only it swings ~+6.6 ranks.
-2. **The continuation is not.** Fixing only it buys ~+1.3 and stays deeply
-   negative — policy iteration alone would not have rescued this.
-3. **The search machinery is sound.** arm4 > arm5: given correct valuations,
-   searching *beats* greedily taking the best available player.
+| arm | mean rank | gain vs `need_adp` | se | t |
+|---|---|---|---|---|
+| `need_adp` | 4.69 | — | — | — |
+| arm1 projections + `need_adp` | 7.28 | −2.594 | 0.883 | −2.94 |
+| arm2 **hindsight objective** | 1.38 | **+3.312** | 0.560 | **+5.92** |
+| arm3 hindsight continuation | 5.62 | −0.938 | 0.957 | −0.98 |
+| arm4 both | 1.22 | **+3.469** | 0.537 | **+6.46** |
+| arm5 greedy on realized value | 1.62 | +3.062 | 0.564 | +5.43 |
 
-arm2/arm4 are cheats by construction, so their level is a bound, not a score.
+1. **The objective is the dominant cause.** Fixing only it swings **+5.91 ranks**
+   (−2.594 → +3.312), from significantly worse than consensus to significantly
+   better.
+2. **The continuation matters, but cannot win on its own.** Fixing only it
+   removes 1.66 of the 2.59-rank deficit, yet lands at −0.938 (t=−0.98) —
+   indistinguishable from consensus, no gain. Policy iteration alone would have
+   repaired the damage without producing an edge.
+3. **The two channels are not additive** (1.66 + 5.91 = 7.57 against an observed
+   6.06 swing to arm4). A hindsight continuation partially compensates for a bad
+   objective by making the rollout rosters better, so the channels overlap.
+4. **The search machinery is not the limit.** arm4 (+3.469) at least matches
+   arm5 (+3.062), i.e. searching with correct valuations does as well as
+   greedily taking the best available player. The +0.41 difference is in the
+   direction of search adding value on top, but the arms have overlapping SEs
+   and the paired SE of the difference was not computed — **treat arm4 ≈ arm5
+   as the supported claim**, not arm4 > arm5.
+
+arm2/arm4/arm5 are cheats by construction, so their level is a bound, not a
+score.
 
 ## Why: the optimizer's curse
 
@@ -114,10 +129,11 @@ where the same error that averages out becomes the thing being maximized over.
 
 Rejected as *evidence*, not as a hypothesis: **positional timing**. "The agent
 drafts RB three rounds early" was used as the behavioural signature of the bug.
-arm5 — perfect foresight — drafts RB at mean round 4.9 vs consensus 7.4, so RB
-early was *correct* here; and the two best arms have near-opposite profiles
-(arm4 RB 8.0, arm5 RB 4.9). The statistic is also crude: mean round over all 15
-picks conflates when you first take a position with how many you take.
+arm5 — perfect foresight — drafts RB at mean round 5.5 vs consensus 7.5, so RB
+early was *correct* here; and the two best arms have opposite profiles (arm4 RB
+7.6 / TE 4.8, arm5 RB 5.5 / TE 11.8) while performing within 0.4 ranks of each
+other. The statistic is also crude: mean round over all 15 picks conflates when
+you first take a position with how many you take.
 
 ## Consequences
 
