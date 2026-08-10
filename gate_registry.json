@@ -1,0 +1,28 @@
+{
+  "_note": "Ledger of every run against the held-out seasons (2024, 2025). Seeded 2026-08-10 from replay artifacts found in data/processed/, which proved the holdout had already been spent well before the enforcement code existed. The budget is over, deliberately recorded as over rather than reset: pretending otherwise is what the file is meant to prevent. See docs/WHERE_WE_ARE.md section 9.",
+  "experiments": {
+    "v2_gate_original": {
+      "hypothesis": "The v2 season-sim agent beats need_adp on held-out seasons. Result: 2025 +0.253 (n=360), 2024 +0.161 (n=360), pooled +0.207 t=1.58 -- failed its own p<0.10 bar.",
+      "registered": "retroactive",
+      "touches": [
+        {"season": 2025, "at": "pre-2026-08-07", "note": "replay_2025_full.csv, 360 replicates"},
+        {"season": 2024, "at": "pre-2026-08-07", "note": "replay_2024_full.csv, 360 replicates"}
+      ]
+    },
+    "early_multi_policy": {
+      "hypothesis": "Unrecorded. Four policies (adp, need_adp, vorp_greedy, season_sim) over 120 replicates on 2025.",
+      "registered": "retroactive",
+      "touches": [
+        {"season": 2025, "at": "unknown", "note": "replay_2025.csv, 120 replicates"}
+      ]
+    },
+    "post_flex_fix": {
+      "hypothesis": "After fixing the FLEX hindsight bug, the agent's edge changes. Result quoted as +0.485 se 0.180 t=2.69.",
+      "registered": "retroactive",
+      "touches": [
+        {"season": 2024, "at": "2026-08-07", "note": "replay_2024_clean.csv, 144 replicates"},
+        {"season": 2025, "at": "2026-08-07", "note": "replay_2025_crn.csv, 144 replicates"}
+      ]
+    }
+  }
+}

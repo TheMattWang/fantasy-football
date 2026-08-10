@@ -308,7 +308,7 @@ year." **Treat n = 4 as the real sample size for any claim about the future.**
 | 0c common random numbers | done |
 | 0d realistic opponents | done |
 | 0e ceiling experiment | done — **failed its own bar** |
-| 0f gate protocol enforcement | **NOT BUILT** |
+| 0f gate protocol enforcement | done — `src/evaluation/protocol.py` + `gate_registry.json` |
 | 0g checkpointing | done |
 | Stage 1 (GPU port) and all four ML arms | **on hold** |
 
@@ -328,11 +328,39 @@ scarcity — if your league runs 3 receivers, or two flex slots, or full PPR, th
 valuations move. Every number in this document was computed on a guess. **This
 requires you; it needs a browser login.**
 
-**The final test seasons are protected only by discipline.** 2024 and 2025 are
-the held-out gate and remain untouched, which is good. But 0f — the code that
-was supposed to *refuse* to run against them without a pre-registered
-experiment name — was never built. Worth building before anything is tested
-there, because the value of a held-out test is exactly the discipline around it.
+**The holdout is already spent. This document previously said otherwise, and
+that was wrong.**
+
+Building the enforcement code turned up five replay artifacts sitting in
+`data/processed/`: `replay_2024_full.csv` and `replay_2025_full.csv` (360
+replicates each — the original v2 gate, which is where the +0.253 / +0.161
+numbers in section 1 came from), `replay_2025.csv` (120 replicates, four
+policies), and `replay_2024_clean.csv` / `replay_2025_crn.csv` (144 replicates
+each, the post-FLEX-fix re-run quoted as +0.485). That is **five touches against
+a budget of three**, and it means 2024/2025 have been iterated on rather than
+held out.
+
+The registry was seeded from those artifacts rather than reset, so the code now
+tells the truth and refuses further gate runs:
+
+```
+GateError: the holdout budget is spent: 5/3 touches already recorded
+({'v2_gate_original': 2, 'early_multi_policy': 1, 'post_flex_fix': 2}).
+2024/2025 are burned; any further evaluation against them is tuning, not a test.
+```
+
+The mechanism itself works as designed: `replay_season` refuses holdout seasons
+under the default `protocol="tune"`, a `protocol="gate"` run needs a
+`--register` name already committed to `gate_registry.json` with its hypothesis
+written down, and the ledger is checked in so spending a touch shows up in a
+diff. It simply arrived after the budget was gone.
+
+**What this costs.** Any future number measured on 2024/2025 is tuning, not
+evidence — the seasons have seen enough iteration that a good result on them no
+longer distinguishes a real edge from a fitted one. The honest remaining option
+is a **prospective** test: run the agent in the actual 2026 season and see. That
+cannot be contaminated, and it is the only clean test left. It also means the
++0.485 post-FLEX-fix figure should be read as a tuning result, not a gate pass.
 
 ---
 

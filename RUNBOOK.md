@@ -77,8 +77,22 @@ search will take bad risks.
 
 ## 3. Run the gate
 
+Tuning runs go against 2022/2023 and are unlimited:
+
+```bash
+./.venv/bin/python -m src.evaluation.replay --season 2023 --replicates 200 \
+    --policies adp need_adp vorp_greedy season_sim
+```
+
+2024/2025 are the held-out gate, with a budget of **3 touches for the whole
+project**. The code enforces it: a gate season needs `--protocol gate` and a
+`--register` name that already exists in `gate_registry.json`, otherwise the
+run refuses to start. Write the hypothesis into that file and commit it
+*before* running — that commit is what makes the pre-registration real.
+
 ```bash
 ./.venv/bin/python -m src.evaluation.replay --season 2025 --replicates 200 \
+    --protocol gate --register shrinkage_v1 \
     --policies adp need_adp vorp_greedy season_sim
 ```
 

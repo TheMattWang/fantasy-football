@@ -53,6 +53,8 @@ from ..simulation.season import (
     round_robin_schedule,
     simulate_league,
 )
+# Imported by name: `protocol` is also a parameter of replay_season.
+from .protocol import check as check_protocol, record_touch
 
 
 def actual_weekly(
@@ -178,8 +180,15 @@ def replay_season(
     out_path: Optional[Path] = None,
     flush_every: int = 10,
     replicate_start: int = 0,
+    protocol: str = "tune",
+    register: Optional[str] = None,
 ) -> pd.DataFrame:
     """Draft ``season`` with each policy and score with that season's real results.
+
+    ``protocol`` decides which seasons this run is allowed to see. The default,
+    ``"tune"``, covers 2022/2023 and *refuses* 2024/2025; touching the holdout
+    needs ``protocol="gate"`` plus a ``register`` name already committed to
+    ``gate_registry.json``. See ``src/evaluation/protocol.py`` for why.
 
     Pass ``out_path`` to make the run resumable. Results are flushed every
     ``flush_every`` replicates and a restart skips any ``(replicate, policy)``
@@ -190,6 +199,9 @@ def replay_season(
     seeds its own generator from ``10_000 + replicate``, so a pair computed
     after a restart is bit-identical to one computed before it.
     """
+    # Before anything expensive, and before any holdout data is read.
+    check_protocol(season, protocol=protocol, register=register)
+
     config = config or provisional_config()
     slots = list(slots) if slots is not None else list(range(n_teams))
     agent_kwargs = agent_kwargs or {}
@@ -300,12 +312,19 @@ def replay_season(
                 )
 
     if out_path is not None:
-        existing = _flush(out_path, rows, existing)
-        return existing
+        frame = _flush(out_path, rows, existing)
+    elif not existing.empty:
+        frame = pd.concat(
+            [existing, pd.DataFrame([r.__dict__ for r in rows])], ignore_index=True
+        )
+    else:
+        frame = pd.DataFrame([r.__dict__ for r in rows])
 
-    return pd.concat(
-        [existing, pd.DataFrame([r.__dict__ for r in rows])], ignore_index=True
-    ) if not existing.empty else pd.DataFrame([r.__dict__ for r in rows])
+    # Charged only once results exist: a run that crashes costs no touch.
+    if protocol == "gate":
+        record_touch(register, season, note=f"replay {sorted(policies)}")
+
+    return frame
 
 
 def summarize(frame: pd.DataFrame, baseline: str = "need_adp") -> pd.DataFrame:
@@ -347,7 +366,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     import warnings
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--season", type=int, default=2025)
+    # Defaults to a tuning season: a bare invocation must not be able to spend
+    # a holdout touch by accident.
+    parser.add_argument("--season", type=int, default=2023)
+    parser.add_argument(
+        "--protocol", choices=["tune", "gate"], default="tune",
+        help="tune: 2022/2023, unlimited. gate: 2024/2025, needs --register "
+             "and costs one of 3 pre-registered touches",
+    )
+    parser.add_argument(
+        "--register", type=str, default=None,
+        help="name of an experiment already in gate_registry.json (gate only)",
+    )
     parser.add_argument("--replicates", type=int, default=60)
     parser.add_argument(
         "--policies", nargs="+",
@@ -363,9 +393,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     warnings.filterwarnings("ignore")
 
-    print(f"replaying {args.season}: {args.policies} x {args.replicates} replicates")
+    print(
+        f"replaying {args.season} [{args.protocol}]: "
+        f"{args.policies} x {args.replicates} replicates"
+    )
     frame = replay_season(
         args.season,
+        protocol=args.protocol,
+        register=args.register,
         policies=args.policies,
         n_replicates=args.replicates,
         agent_kwargs={

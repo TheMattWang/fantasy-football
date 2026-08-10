@@ -1,7 +1,10 @@
 # Why the draft agent loses to consensus
 
 Measured 2026-08-07/08 on the tuning seasons (2022, 2023). **Nothing here has
-touched 2024/2025** — those are the gate, ≤3 touches, still unspent.
+touched 2024/2025** in the experiments below. But the holdout is NOT intact:
+five prior replay runs against those seasons were found on disk on 2026-08-10
+(5 touches against a budget of 3). See docs/WHERE_WE_ARE.md section 9. Treat any
+2024/2025 number as tuning, not evidence.
 
 ## The finding in one line
 
@@ -111,11 +114,32 @@ optimal shrinkage is ~100%, i.e. `need_adp`); E2's argmax landing at or below
 random (random is unbiased, argmax is selected); and arm2 flipping −3.6 to +3.0
 once `eps` is zero.
 
-**`need_adp` is immune** because it ranks by market ADP rather than by its own
-projections — nothing is selected on its own error. This is also why the board's
-+22.4 pts/pick edge does not contradict any of the above: that is an *estimation*
-result averaged over all players, while the draft asks a *selection* question,
-where the same error that averages out becomes the thing being maximized over.
+**`need_adp` is immune**, but not for the reason first written here. An earlier
+version claimed it ranks by market ADP rather than by our projections. It does
+not: `board.py:93` sets `adp_rank = ecr_rank`, so `need_adp` follows *expert
+consensus*. The real mechanism is sharper.
+
+`proj_ppg = curve.ppg_at(position, pos_rank)` (`board.py:63-67`) is a
+deterministic function of position and expert rank. So **within a position our
+ordering is identical to the experts' by construction** — we never disagree about
+which RB is better. The only thing the curve adds, and therefore the only thing
+we can get wrong, is the **cross-position exchange rate**: how many points RB #12
+is worth versus WR #15. A ranking does not contain that number; a curve does.
+
+`need_adp` never estimates an exchange rate at all — it takes the best-ranked
+player that fits the roster and stops. You cannot be wrong about a quantity you
+never compute. That predicts the error is *systematic curve bias at a position
+and rank range*, not scattered per-player mistakes, which is a much smaller thing
+to measure and is what experiment V1 measures.
+
+This is also why the board's +22.4 pts/pick edge does not contradict any of the
+above: that is an *estimation* result averaged over all players, while the draft
+asks a *selection* question, where the same error that averages out becomes the
+thing being maximized over.
+
+Unused signal worth noting: real market ADP **is** on the board, as `ffc_adp`,
+and is currently consumed only by the opponent model. It never touches our
+valuation.
 
 ## Hypotheses tested and rejected
 
