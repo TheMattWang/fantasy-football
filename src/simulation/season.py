@@ -140,6 +140,45 @@ def make_waiver_draws(
     return rng.random((n_samples, n_weeks, n_channels)).astype(np.float32)
 
 
+def _reactive_estimate(
+    realized: np.ndarray, prior_ppg: np.ndarray, prior_games: float
+) -> np.ndarray:
+    """A manager's running estimate of a scoring rate, week by week.
+
+    ``(samples, players, weeks) -> (samples, players, weeks)``.
+
+    Blends the preseason projection with what has actually happened, weighting
+    the prior as if it were ``prior_games`` games::
+
+        estimate[w] = (k * mu + points before w) / (k + games before w)
+
+    At week 0 nothing has been observed and this collapses to ``mu``, which is
+    exactly the frozen behaviour. As the season runs it migrates toward the
+    observed rate, which is what a manager benching a bust is doing informally.
+    ``k`` is how stubborn he is: large k barely reacts, small k chases noise.
+
+    **The one-week shift is the whole point.** Week ``w`` may see weeks strictly
+    before it and nothing else. Including week ``w`` would be the FLEX hindsight
+    bug over again -- the same off-by-one, one level up -- and it would inflate
+    every roster while every test still passed.
+    """
+    if prior_games <= 0:
+        raise ValueError("reactive_prior_games must be > 0; at week 0 there is "
+                         "nothing observed and the prior is all there is")
+
+    active = realized > 0
+    cum_points = np.cumsum(realized, axis=2, dtype=np.float64)
+    cum_games = np.cumsum(active, axis=2, dtype=np.float64)
+
+    pad = np.zeros(realized.shape[:2] + (1,), dtype=np.float64)
+    seen_points = np.concatenate([pad, cum_points[:, :, :-1]], axis=2)
+    seen_games = np.concatenate([pad, cum_games[:, :, :-1]], axis=2)
+
+    mu = np.asarray(prior_ppg, dtype=np.float64)[None, :, None]
+    k = float(prior_games)
+    return ((k * mu + seen_points) / (k + seen_games)).astype(np.float32)
+
+
 def lineup_points(
     samples: SampleSet,
     plan: RosterPlan,
@@ -150,14 +189,25 @@ def lineup_points(
     flex_omniscient: Optional[bool] = None,
     contested_waivers: bool = True,
     waiver_draws: Optional[np.ndarray] = None,
+    reactive_prior_games: Optional[float] = None,
     rng: Optional[np.random.Generator] = None,
-) -> np.ndarray:
+) -> np.ndarray:  # noqa: D401 - see _reactive_estimate below
     """Weekly starting-lineup totals for one roster. Shape (samples, weeks).
 
     Starters are chosen by projected value among *available* players, then the
     realized points of whoever was started are summed. Setting ``omniscient``
     picks by realized points instead; it is only there to quantify how much
     hindsight inflates a roster.
+
+    ``reactive_prior_games`` turns on in-season management. By default the
+    ranking key is the *preseason* projection and never changes, so a player who
+    has been terrible for eight weeks still starts on the strength of his August
+    number -- there is no start/sit decision in the model at all. That is not a
+    small simplification: T2 measured the gap between a frozen lineup and a
+    perfect one at 4.457 ranks, against 0.832 for a realistic draft improvement.
+    Passing a number here ranks instead by a running estimate that blends the
+    preseason prior with what has actually happened, weighting the prior as if
+    it were that many games. See :func:`_reactive_estimate`.
 
     ``flex_omniscient`` does the same for the FLEX slot alone. It exists because
     the flex used to be picked by realized points while the dedicated slots were
@@ -223,6 +273,10 @@ def lineup_points(
             # Ex-ante: rank by preseason projection, but a player who is out
             # cannot be started, so drop him behind everyone available.
             projection = samples.decision_score[rows][None, :, None]
+            if reactive_prior_games is not None:
+                projection = _reactive_estimate(
+                    realized, samples.decision_score[rows], reactive_prior_games
+                )
             available = realized > 0
             ranked_by = np.where(available, projection, -1.0).astype(np.float32)
 
@@ -421,10 +475,13 @@ def evaluate_roster(
     n_samples: Optional[int] = None,
     schedule: Optional[np.ndarray] = None,
     waiver_draws: Optional[np.ndarray] = None,
+    reactive_prior_games: Optional[float] = None,
 ) -> SeasonResult:
     """Score one candidate roster against fixed, pre-simulated opponents."""
     plan = plan_roster(roster, samples, config)
-    mine = lineup_points(samples, plan, n_samples=n_samples, waiver_draws=waiver_draws)
+    mine = lineup_points(samples, plan, n_samples=n_samples,
+                         waiver_draws=waiver_draws,
+                         reactive_prior_games=reactive_prior_games)
 
     n_s = mine.shape[0]
     stacked = np.concatenate([mine[None, :, :], opponent_weekly[:, :n_s, :]], axis=0)

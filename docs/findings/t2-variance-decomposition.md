@@ -3,6 +3,15 @@
 **Verdict: KEPT (in-season management is the larger lever), with two caveats that
 both shrink the magnitude. The direction is solid; the size is soft.**
 
+> **REVISED by T3 (`t3-realistic-in-season.md`), 2026-08-16.** Caveat 2 below was
+> the right worry and it was larger than expected. Against a *realistic* manager
+> rather than a frozen lineup, in-season management is worth **+1.523 ranks**, not
+> 4.457. Matched against the realistic draft improvement of 0.832 that gives a
+> ratio of **1.8×**, which is *below* the 2× threshold pre-registered here. **Do
+> not quote the 5.4×.** The conclusion still holds for this project, but it rests
+> on the no-edge result (our own realistic draft improvement is ≈ 0, not 0.832),
+> not on the ratio.
+
 Run 2026-08-16. Script: `experiments/worker_t2.py`.
 
 ## Why
