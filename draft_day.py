@@ -24,6 +24,21 @@ What the recommendation columns mean
                spread means the pick barely matters, so take the scarcer player
     P(next)    chance this player is still there at our next turn -- the number
                that should decide whether to reach
+
+The table and the PICK come from different places, on purpose
+-------------------------------------------------------------
+The table is context from the season simulation. The pick is consensus.
+
+E2 measured the simulation's argmax at **1.582** regret against the best
+available candidate, versus **0.891** for consensus -- and **1.548** for a
+candidate chosen at RANDOM. U ranks whole rosters well (rho = -0.32, p<0.0001)
+and cannot rank two players at a single pick, because a shortlist is players
+adjacent in ADP whose true values differ by less than our projection error, so
+taking the argmax selects on the error rather than on the player.
+
+So U is displayed and not obeyed. ``--recommender season_sim`` restores the old
+behaviour for anyone who wants it; it is not the default and the measurements
+say it should not be.
 """
 
 from __future__ import annotations
@@ -92,55 +107,66 @@ def find_player(query: str, names: List[str], available: np.ndarray) -> Optional
     return None
 
 
-def show_recommendations(policy, sim: DraftSim, team: int, top: int = 8) -> None:
+def show_recommendations(
+    policy, recommender, sim: DraftSim, team: int, top: int = 8
+) -> None:
+    """Print the candidate table, then the pick. They come from different places.
+
+    ``policy`` supplies the table -- U, how tightly the options separate, and
+    survival to our next turn. ``recommender`` supplies the actual PICK, and
+    defaults to consensus. See the module docstring for why.
+    """
     print("\n  thinking...", end="", flush=True)
     candidates = policy.evaluate(sim, team)
+    pick_row = recommender.choose(sim, team)
     print("\r" + " " * 14 + "\r", end="")
 
-    if not candidates:
-        print("  no candidates")
-        return
-
-    best = candidates[0].utility
-    print(f"  {'player':<26}{'pos':<5}{'ecr':>7}{'U':>9}{'dU':>8}{'P(next)':>9}")
-    for candidate in candidates[:top]:
-        delta = candidate.utility - best
-        print(
-            f"  {candidate.name:<26}{candidate.position:<5}{candidate.adp:>7.1f}"
-            f"{candidate.utility:>9.4f}{delta:>8.4f}{candidate.p_available_next:>9.2f}"
-        )
-
-    # The table above is the raw ranking; choose() shrinks toward consensus
-    # unless the edge clears the noise floor. Show what it would ACTUALLY take,
-    # or the tool recommends one player and the agent drafts another.
-    actual_row = policy.decide(candidates, sim, team)
-    actual = next((c for c in candidates if c.row == actual_row), None)
-    margin = getattr(policy, "confidence_margin", 0.0)
-    best = candidates[0]
-
-    print()
-    if actual is None:
-        print(f"  PICK: {sim.board.names[actual_row]}")
-    elif actual.row == best.row:
-        gap = best.utility - candidates[1].utility if len(candidates) > 1 else 0.0
-        print(f"  PICK: {actual.name} -- {gap:.4f} clear of the next option.")
-    else:
-        print(f"  PICK: {actual.name}")
-        print(
-            f"    {best.name} scores {best.utility - actual.utility:+.4f} higher, "
-            f"but that is inside the noise floor ({margin:.3f}), so this defers"
-        )
-        print(
-            f"    to consensus. The simulation only overrides the market when it "
-            f"is confident."
-        )
-
-    scarce = min(candidates[:3], key=lambda c: c.p_available_next)
-    if np.isfinite(scarce.p_available_next):
-        if actual is not None and actual.p_available_next > 0.8:
+    if candidates:
+        top_utility = candidates[0].utility
+        print(f"  {'player':<26}{'pos':<5}{'ecr':>7}{'U':>9}{'dU':>8}{'P(next)':>9}")
+        for candidate in candidates[:top]:
+            delta = candidate.utility - top_utility
             print(
-                f"    {actual.name} is {actual.p_available_next:.0%} to last to "
-                f"your next turn -- consider taking {scarce.name} first."
+                f"  {candidate.name:<26}{candidate.position:<5}{candidate.adp:>7.1f}"
+                f"{candidate.utility:>9.4f}{delta:>8.4f}{candidate.p_available_next:>9.2f}"
+            )
+
+    # need_adp's legality rules differ from the shortlist's (forced K/DEF late,
+    # positional limits), so its pick is not guaranteed to be in the table.
+    picked = next((c for c in candidates if c.row == pick_row), None)
+    name = picked.name if picked is not None else str(sim.board.names[pick_row])
+
+    print(f"\n  PICK: {name}   [{getattr(recommender, 'name', 'recommender')}]")
+
+    # Surface the disagreement rather than hiding it -- and do not act on it.
+    if candidates and candidates[0].row != pick_row:
+        top_choice = candidates[0]
+        if picked is not None:
+            gap = f"by {top_choice.utility - picked.utility:+.4f} U"
+        else:
+            gap = "(this pick is outside the shortlist)"
+        print(f"    the simulation prefers {top_choice.name} {gap}. Not taken:")
+        print(
+            "    U's argmax measured WORSE than consensus at the pick level "
+            "-- regret 1.582"
+        )
+        print(
+            "    vs 0.891, and a RANDOM candidate scores 1.548. "
+            "--recommender season_sim overrides."
+        )
+
+    # Survival comes from ADP dispersion, not from our valuation, so none of the
+    # above touches it. This is the column worth acting on.
+    if candidates and picked is not None:
+        scarce = min(candidates[:3], key=lambda c: c.p_available_next)
+        if (
+            np.isfinite(scarce.p_available_next)
+            and picked.p_available_next > 0.8
+            and scarce.row != picked.row
+        ):
+            print(
+                f"    {name} is {picked.p_available_next:.0%} to last to your "
+                f"next turn -- consider taking {scarce.name} first."
             )
 
 
@@ -161,7 +187,8 @@ def print_roster(sim: DraftSim, team: int) -> None:
     print(f"  counts: {counts}")
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Factored out so the defaults are testable without building a board."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--board", default="data/processed/board_2026.csv")
@@ -174,7 +201,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--rollouts", type=int, default=2)
     parser.add_argument("--fast", action="store_true",
                         help="fewer rollouts; use if picks are timing out")
-    args = parser.parse_args(argv)
+    parser.add_argument("--recommender", choices=("need_adp", "season_sim"),
+                        default="need_adp",
+                        help="what makes the actual pick. Default is consensus: "
+                             "the season simulation's argmax measured worse than "
+                             "consensus at the pick level (E2). The simulation "
+                             "still fills the table either way.")
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
 
     path = Path(args.board)
     if not path.exists():
@@ -212,7 +249,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         eval_samples=250 if args.fast else 400,
         rng=rng,
     )
-    fallback = NeedAdpPolicy(board, config)
+    # The simulation always fills the table; this decides who actually picks.
+    recommender = (
+        policy if args.recommender == "season_sim" else NeedAdpPolicy(board, config)
+    )
+    print(f"  recommender: {recommender.name}")
 
     sim = DraftSim(board, n_teams, n_rounds)
     names = [str(n) for n in board.names]
@@ -228,7 +269,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"(team {team + 1}){marker} ---"
         )
         if team == our_team:
-            show_recommendations(policy, sim, team)
+            show_recommendations(policy, recommender, sim, team)
 
         try:
             raw = input("> ").strip()
@@ -244,7 +285,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             break
         if lowered == "?":
             if team == our_team:
-                show_recommendations(policy, sim, team)
+                show_recommendations(policy, recommender, sim, team)
             else:
                 print("  (not our pick -- type the name of the player taken)")
             continue
