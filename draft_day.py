@@ -53,7 +53,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.data.assertions import validate_board  # noqa: E402
+from src.data.assertions import (  # noqa: E402
+    BoardValidationError,
+    load_provenance,
+    validate_board,
+    validate_freshness,
+)
 from src.data.league_config import load_or_provisional  # noqa: E402
 from src.draft.engine import DraftBoard, DraftSim  # noqa: E402
 from src.draft.opponents import OpponentModel, assign_archetypes  # noqa: E402
@@ -201,6 +206,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rollouts", type=int, default=2)
     parser.add_argument("--fast", action="store_true",
                         help="fewer rollouts; use if picks are timing out")
+    parser.add_argument("--season", type=int, default=2026,
+                        help="only used in the rebuild hint on a stale board")
+    parser.add_argument("--allow-stale", action="store_true",
+                        help="draft against a stale or incomplete board anyway. "
+                             "Staleness is fatal by default: consensus moves "
+                             "daily in August, and a board with no market ADP "
+                             "computes P(next) from a ~2x-too-wide spread.")
     parser.add_argument("--recommender", choices=("need_adp", "season_sim"),
                         default="need_adp",
                         help="what makes the actual pick. Default is consensus: "
@@ -221,6 +233,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     frame = pd.read_csv(path)
     validate_board(frame[frame.get("is_streamed", False) != True])  # noqa: E712
+
+    # validate_board says the board is well-formed. It cannot say it is CURRENT,
+    # and a three-week-old board passes every check in it. On the clock that
+    # distinction matters, so staleness is fatal here unless explicitly waived.
+    try:
+        validate_freshness(load_provenance(path), for_draft=not args.allow_stale,
+                           raise_on_fatal=True)
+    except BoardValidationError as exc:
+        print(f"\n{exc}\n", file=sys.stderr)
+        print("Rebuild it:\n"
+              f"  python -m src.projections.board --season {args.season} "
+              f"--refresh --require-market --out {path}\n"
+              "or pass --allow-stale to draft anyway.", file=sys.stderr)
+        return 1
 
     config = load_or_provisional()
     n_teams = args.teams or config.num_teams

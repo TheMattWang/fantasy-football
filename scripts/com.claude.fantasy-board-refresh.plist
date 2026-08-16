@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Daily draft-board refresh. Install with:
+
+      cp scripts/com.claude.fantasy-board-refresh.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.claude.fantasy-board-refresh.plist
+
+  Remove with:
+
+      launchctl unload ~/Library/LaunchAgents/com.claude.fantasy-board-refresh.plist
+
+  Runs at 06:30, before the 07:00 morning brief, so the brief reflects a board
+  that has already been pulled forward. RunAtLoad fires it once on install so
+  you find out immediately whether it works, rather than tomorrow morning.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.fantasy-board-refresh</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/mattwang/Documents/fantasy/fantasy-football/scripts/refresh_board.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/mattwang/.claude/daily-log/fantasy-board-refresh.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mattwang/.claude/daily-log/fantasy-board-refresh.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TZ</key>
+        <string>America/Los_Angeles</string>
+        <key>FANTASY_SEASON</key>
+        <string>2026</string>
+    </dict>
+</dict>
+</plist>

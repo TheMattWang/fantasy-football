@@ -114,13 +114,19 @@ def preseason_snapshot(
     history: Optional[pd.DataFrame] = None,
     page_type: str = "redraft-overall",
     positions: Sequence[str] = SKILL_POSITIONS,
+    refresh: bool = False,
 ) -> pd.DataFrame:
     """The last preseason consensus ranking for ``season``.
 
     Returns one row per player with ``ecr``, ``sd``, ``best``, ``worst``, an
     overall ``ecr_rank`` and a within-position ``pos_rank``.
+
+    ``refresh`` re-downloads the ECR history instead of reading the local cache.
+    It matters more than it looks: consensus moves daily through August on
+    injuries and holdouts, and without it a "rebuild" returns a byte-identical
+    board built from whenever the parquet was first fetched.
     """
-    history = load_ecr_history() if history is None else history
+    history = load_ecr_history(refresh=refresh) if history is None else history
 
     frame = history[history["page_type"] == page_type]
     frame = frame[frame["scrape_date"].dt.year == season]

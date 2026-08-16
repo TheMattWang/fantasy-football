@@ -243,3 +243,119 @@ def _finish(report: BoardReport, raise_on_fatal: bool, emit_warnings: bool) -> B
             "draft board failed validation:\n  - " + "\n  - ".join(report.fatal)
         )
     return report
+
+
+# --- freshness ------------------------------------------------------------
+#
+# validate_board answers "is this board structurally sound". It cannot answer
+# "is this board CURRENT", and a three-week-old board passes every check in it.
+# That gap is how the 2026 board sat at an ECR snapshot of 2026-08-07 with no
+# market dispersion at all, while every assertion stayed green -- the same
+# quiet-degradation shape as the 2025 VORP bug, one level up.
+
+# Consensus moves daily through August on injuries, holdouts and depth charts,
+# so draft day wants a tight bound. Research does not care nearly as much.
+DRAFT_MAX_ECR_AGE_DAYS = 3.0
+RESEARCH_MAX_ECR_AGE_DAYS = 21.0
+
+# Below this share of the drafted range, `adp_sd` is mostly the fitted line
+# rather than measured dispersion, which is what P(next) is computed from.
+MIN_MARKET_COVERAGE = 0.80
+
+
+def validate_freshness(
+    provenance: Optional[Dict[str, Any]],
+    *,
+    for_draft: bool = False,
+    max_ecr_age_days: Optional[float] = None,
+    today: Optional["datetime.date"] = None,
+    raise_on_fatal: bool = True,
+    emit_warnings: bool = True,
+) -> BoardReport:
+    """Check that a board is CURRENT, not merely well-formed.
+
+    Severity is deliberately context-dependent. A stale board is a nuisance for
+    research and a real problem on the clock, so ``for_draft=True`` promotes
+    every finding here from warning to fatal.
+
+    Args:
+        provenance: the dict written to ``<board>.provenance.json``.
+        for_draft: treat staleness as fatal rather than as a warning.
+        max_ecr_age_days: override the default bound.
+        today: injected for testing.
+    """
+    import datetime as _datetime
+
+    report = BoardReport()
+    bucket = report.fatal if for_draft else report.warnings
+    limit = max_ecr_age_days if max_ecr_age_days is not None else (
+        DRAFT_MAX_ECR_AGE_DAYS if for_draft else RESEARCH_MAX_ECR_AGE_DAYS
+    )
+    report.stats["max_ecr_age_days"] = limit
+
+    if not provenance:
+        bucket.append(
+            "no provenance sidecar -- cannot tell how old this board is. "
+            "Rebuild with: python -m src.projections.board --refresh --out <path>"
+        )
+        return _finish(report, raise_on_fatal, emit_warnings)
+
+    report.n_players = int(provenance.get("rows") or 0)
+
+    # The SNAPSHOT date, not the download time. Re-downloading an unchanged
+    # parquet resets the file mtime and would otherwise look like freshness.
+    snapshot = (provenance.get("ecr") or {}).get("snapshot_date")
+    if not snapshot:
+        bucket.append("provenance records no ECR snapshot date")
+    else:
+        try:
+            taken = _datetime.date.fromisoformat(str(snapshot))
+        except ValueError:
+            bucket.append(f"unparseable ECR snapshot date {snapshot!r}")
+        else:
+            age = ((today or _datetime.date.today()) - taken).days
+            report.stats["ecr_snapshot"] = str(snapshot)
+            report.stats["ecr_age_days"] = age
+            if age > limit:
+                bucket.append(
+                    f"ECR snapshot is {age} days old ({snapshot}), limit {limit:.0f}. "
+                    "Consensus moves daily in August; rebuild with --refresh."
+                )
+
+    market = provenance.get("market_adp") or {}
+    coverage = float(market.get("coverage") or 0.0)
+    report.stats["market_coverage"] = coverage
+    if not market.get("attached"):
+        bucket.append(
+            "market ADP did not attach, so adp_sd falls back to ecr_sd, which "
+            "runs ~2x the real draft spread and corrupts P(next)"
+        )
+    elif coverage < MIN_MARKET_COVERAGE:
+        bucket.append(
+            f"market ADP covers only {coverage:.0%} of the drafted range "
+            f"(want >= {MIN_MARKET_COVERAGE:.0%}); the rest is a fitted line"
+        )
+
+    # Never fatal: this one is the user's decision, not a pipeline failure.
+    if provenance.get("config_provisional"):
+        report.warnings.append(
+            "board built on PROVISIONAL league settings -- replacement level, "
+            "and therefore every VORP, rests on assumed roster slots"
+        )
+
+    return _finish(report, raise_on_fatal, emit_warnings)
+
+
+def load_provenance(csv_path) -> Optional[Dict[str, Any]]:
+    """Read the sidecar beside a board CSV. Returns None when absent."""
+    import json
+    import pathlib
+
+    path = pathlib.Path(csv_path).with_suffix(".provenance.json")
+    if not path.exists():
+        return None
+    try:
+        with open(path) as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
