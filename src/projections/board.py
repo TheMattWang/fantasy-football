@@ -53,6 +53,7 @@ def build_board(
     validate: bool = True,
     market_dispersion: bool = True,
     refresh: bool = False,
+    history: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Draft board for ``season``, anchored on preseason consensus.
 
@@ -67,10 +68,19 @@ def build_board(
     """
     config = config or load_or_provisional()
     train = list(train_seasons) if train_seasons else _train_seasons(season)
-    curve = curve or fit_baseline(train)
+    # `history` has to reach the curve as well as the snapshot. Feeding the
+    # snapshot an ADP panel while the curve trains on ECR would anchor the two
+    # halves of the board on different rank systems -- and for a pre-2021 season
+    # the curve would simply fail, which is how this was found.
+    curve = curve or fit_baseline(train, history=history)
 
+    # `history` lets a caller anchor the board on something other than ECR --
+    # `ffc_adp.as_ecr_history` supplies market ADP in the same schema, which is
+    # what reaches seasons before ECR history begins in 2021. Without this the
+    # snapshot silently falls back to ECR and an "ADP-anchored" board is not one.
     board = preseason_snapshot(
-        season, positions=(*SKILL_POSITIONS, *STREAMED_POSITIONS), refresh=refresh
+        season, positions=(*SKILL_POSITIONS, *STREAMED_POSITIONS),
+        refresh=refresh, history=history,
     )
 
     skill = board["pos"].isin(SKILL_POSITIONS)

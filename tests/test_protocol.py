@@ -17,6 +17,8 @@ from src.evaluation import protocol  # noqa: E402
 from src.evaluation.protocol import (  # noqa: E402
     GATE_SEASONS,
     MAX_GATE_TOUCHES,
+    MAX_SEALED_TOUCHES,
+    SEALED_SEASONS,
     TUNING_SEASONS,
     GateError,
     check,
@@ -120,7 +122,62 @@ def test_tuning_seasons_are_unaffected(season, registry):
 
 
 def test_seasons_outside_the_holdout_stay_tunable(registry):
-    check(2019, protocol="tune", registry_path=registry)
+    """2019 used to be the example here. It is now SEALED, so this uses a
+    season that genuinely belongs to nobody."""
+    check(2017, protocol="tune", registry_path=registry)
+
+
+# --- the replacement holdout ---------------------------------------------
+
+@pytest.mark.parametrize("season", SEALED_SEASONS)
+def test_tuning_against_a_sealed_season_is_refused(season, registry):
+    """2019-2021 were bought back with ADP-anchored boards after the 2024/2025
+    gate was found spent. They are worth something exactly once."""
+    with pytest.raises(GateError, match="held-out sealed"):
+        check(season, protocol="tune", registry_path=registry)
+
+
+@pytest.mark.parametrize("season", SEALED_SEASONS)
+def test_a_registered_experiment_may_touch_the_seal(season, registry):
+    check(season, protocol="gate", register="shrinkage_v1", registry_path=registry)
+
+
+def test_the_sealed_budget_is_separate_from_the_spent_gate_budget(registry):
+    """The load-bearing one. The 2024/2025 budget is already exhausted in the
+    real registry; if the seal counted against that same total it would arrive
+    unusable, which would silently waste the whole exercise."""
+    for _ in range(MAX_GATE_TOUCHES):
+        record_touch("shrinkage_v1", 2025, registry)
+
+    with pytest.raises(GateError, match="gate budget is spent"):
+        check(2025, protocol="gate", register="shrinkage_v1", registry_path=registry)
+
+    # ...and the seal is untouched by that.
+    check(2019, protocol="gate", register="shrinkage_v1", registry_path=registry)
+
+
+def test_the_seal_can_itself_be_spent(registry):
+    for season in SEALED_SEASONS[:MAX_SEALED_TOUCHES]:
+        check(season, protocol="gate", register="shrinkage_v1", registry_path=registry)
+        record_touch("shrinkage_v1", season, registry)
+
+    with pytest.raises(GateError, match="sealed budget is spent"):
+        check(2019, protocol="gate", register="shrinkage_v1", registry_path=registry)
+
+
+def test_touches_spent_can_be_scoped_to_one_holdout(registry):
+    record_touch("shrinkage_v1", 2025, registry)
+    record_touch("shrinkage_v1", 2019, registry)
+
+    loaded = load_registry(registry)
+    assert protocol.touches_spent(loaded) == 2
+    assert protocol.touches_spent(loaded, GATE_SEASONS) == 1
+    assert protocol.touches_spent(loaded, SEALED_SEASONS) == 1
+
+
+def test_the_two_holdouts_do_not_overlap():
+    assert not set(GATE_SEASONS) & set(SEALED_SEASONS)
+    assert not set(TUNING_SEASONS) & set(SEALED_SEASONS)
 
 
 @pytest.mark.parametrize("season", GATE_SEASONS)

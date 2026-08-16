@@ -35,7 +35,7 @@ import json
 import urllib.error
 import urllib.request
 import warnings
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -233,3 +233,70 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# --- ADP as a stand-in for expert consensus -------------------------------
+#
+# ECR history begins in 2021, which caps the replayable universe at 2022-2025 --
+# four seasons, all of them already spent as a holdout. FFC half-PPR ADP runs
+# from 2018, and an ADP-anchored board needs no ECR at all, so reshaping FFC into
+# the ECR panel schema buys back seasons 2018-2021 without touching a line of
+# `preseason_snapshot`, `join_actuals` or `fit_baseline` -- all three already
+# accept an injected `history` frame.
+#
+# This is deliberately an ADAPTER rather than a second pipeline. Two board
+# constructions that could drift apart would be worse than none, since every
+# cross-era comparison would then confound the era with the construction.
+
+# FFC's own position label for kickers.
+_POSITION_ALIASES = {"PK": "K", "DST": "DEF"}
+
+# `preseason_snapshot` keeps the LAST snapshot inside the preseason window, so
+# any date in that window works. Late August is when ADP is most informative --
+# close enough to draft day to reflect the news, before week 1 makes it moot.
+_SNAPSHOT_MONTH_DAY = (8, 25)
+
+
+def as_ecr_history(
+    seasons: Iterable[int],
+    *,
+    scoring: str = "half-ppr",
+    teams: int = 12,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """Reshape FFC ADP into the panel schema `preseason_snapshot` expects.
+
+    The mapping is exact rather than approximate, because FFC publishes the same
+    four quantities FantasyPros does:
+
+        ecr  <- adp      the consensus position itself
+        sd   <- stdev    dispersion, and the RIGHT one: FFC measures spread of
+                         actual draft position, whereas `ecr_sd` measures spread
+                         of expert opinion and was found to run ~2x too wide
+        best <- high     earliest a player was taken
+        worst<- low      latest
+
+    Returns a frame with `page_type` and `scrape_date` so it is a drop-in for
+    `load_ecr_history()`.
+    """
+    frames: List[pd.DataFrame] = []
+    for season in seasons:
+        market = fetch_adp(season, scoring=scoring, teams=teams, refresh=refresh)
+        block = pd.DataFrame({
+            "player": market["player_name"].astype(str),
+            "pos": market["position"].astype(str).replace(_POSITION_ALIASES),
+            "team": market.get("team"),
+            "ecr": pd.to_numeric(market["adp"], errors="coerce"),
+            "sd": pd.to_numeric(market["stdev"], errors="coerce"),
+            "best": pd.to_numeric(market["high"], errors="coerce"),
+            "worst": pd.to_numeric(market["low"], errors="coerce"),
+        })
+        block["page_type"] = "redraft-overall"
+        block["scrape_date"] = pd.Timestamp(
+            year=int(season), month=_SNAPSHOT_MONTH_DAY[0], day=_SNAPSHOT_MONTH_DAY[1]
+        )
+        frames.append(block.dropna(subset=["ecr"]))
+
+    if not frames:
+        raise ValueError("no seasons requested")
+    return pd.concat(frames, ignore_index=True)

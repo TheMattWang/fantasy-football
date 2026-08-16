@@ -24,7 +24,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 from ..data.paths import REPO_ROOT
 
@@ -35,6 +35,37 @@ GATE_SEASONS = (2024, 2025)
 # holdout is the budget the project pre-registered, and splitting it across
 # names would be the obvious way to launder extra looks.
 MAX_GATE_TOUCHES = 3
+
+# The replacement holdout, bought back on 2026-08-16.
+#
+# GATE_SEASONS are spent -- five touches against a budget of three -- so the
+# project had no clean test left. ECR history begins in 2021, which is what
+# capped the replayable universe at 2022-2025 in the first place; but FFC
+# half-PPR ADP runs from 2018, and `ffc_adp.as_ecr_history` reshapes it into the
+# same panel schema, so an ADP-anchored board reaches back further. Validated
+# before sealing: ADP and ECR agree within position at Spearman 0.92-0.98 on the
+# shared seasons and predict realized ppg equally well on the SAME players, so
+# the substitution is sound rather than merely available.
+#
+# These seasons have never been evaluated against by anything in this project.
+# That is the only reason they are worth anything, and it is a property that can
+# only be spent once -- hence a separate budget from the burned one above.
+SEALED_SEASONS = (2019, 2020, 2021)
+MAX_SEALED_TOUCHES = 3
+
+# Which holdout a season belongs to, and what it costs against.
+_HOLDOUTS = {
+    "gate": (GATE_SEASONS, MAX_GATE_TOUCHES),
+    "sealed": (SEALED_SEASONS, MAX_SEALED_TOUCHES),
+}
+
+
+def holdout_of(season: int) -> Optional[str]:
+    """Which holdout ``season`` belongs to, or None if it is free to tune on."""
+    for name, (seasons, _) in _HOLDOUTS.items():
+        if season in seasons:
+            return name
+    return None
 
 PROTOCOLS = ("tune", "gate")
 
@@ -78,12 +109,21 @@ def _write_registry(registry: Dict, path: Path) -> None:
     os.replace(tmp, path)
 
 
-def touches_spent(registry: Dict) -> int:
-    """Touches consumed across every registered experiment."""
-    return sum(
-        len(entry.get("touches", []))
-        for entry in registry.get("experiments", {}).values()
-    )
+def touches_spent(registry: Dict, seasons: Optional[Sequence[int]] = None) -> int:
+    """Touches consumed across every registered experiment.
+
+    ``seasons`` restricts the count to one holdout. The two holdouts carry
+    separate budgets: the 2024/2025 gate is already burned, and spending the
+    2019-2021 seal against that same exhausted counter would make the new
+    seasons unusable on arrival.
+    """
+    wanted = None if seasons is None else set(seasons)
+    total = 0
+    for entry in registry.get("experiments", {}).values():
+        for touch in entry.get("touches", []):
+            if wanted is None or touch.get("season") in wanted:
+                total += 1
+    return total
 
 
 def check(
@@ -102,20 +142,23 @@ def check(
             f"unknown protocol {protocol!r}; expected one of {list(PROTOCOLS)}"
         )
 
+    holdout = holdout_of(season)
+
     if protocol == "tune":
-        if season in GATE_SEASONS:
+        if holdout is not None:
             raise GateError(
-                f"{season} is a held-out gate season and cannot be run under "
+                f"{season} is a held-out {holdout} season and cannot be run under "
                 f"protocol='tune'. Tune on {list(TUNING_SEASONS)}. If you really "
                 f"mean to spend a holdout touch, pre-register the experiment in "
                 f"{REGISTRY_PATH.name} and pass protocol='gate' with register=<name>."
             )
         return
 
-    if season not in GATE_SEASONS:
+    if holdout is None:
         raise GateError(
-            f"protocol='gate' is only for the held-out seasons {list(GATE_SEASONS)}; "
-            f"{season} is not one. A gate run on tuning data measures nothing."
+            f"protocol='gate' is only for the held-out seasons "
+            f"{list(GATE_SEASONS)} and {list(SEALED_SEASONS)}; {season} is not "
+            f"one. A gate run on tuning data measures nothing."
         )
 
     if not register:
@@ -147,17 +190,19 @@ def check(
             f"hypothesis. Shape: {shape}"
         )
 
-    spent = touches_spent(registry)
-    if spent >= MAX_GATE_TOUCHES:
+    seasons, budget = _HOLDOUTS[holdout]
+    spent = touches_spent(registry, seasons)
+    if spent >= budget:
         used = {
-            name: len(entry.get("touches", []))
+            name: [t.get("season") for t in entry.get("touches", [])
+                   if t.get("season") in set(seasons)]
             for name, entry in experiments.items()
-            if entry.get("touches")
+            if any(t.get("season") in set(seasons) for t in entry.get("touches", []))
         }
         raise GateError(
-            f"the holdout budget is spent: {spent}/{MAX_GATE_TOUCHES} touches "
-            f"already recorded ({used}). 2024/2025 are burned; any further "
-            f"evaluation against them is tuning, not a test."
+            f"the {holdout} budget is spent: {spent}/{budget} touches already "
+            f"recorded against {list(seasons)} ({used}). Those seasons are "
+            f"burned; any further evaluation against them is tuning, not a test."
         )
 
 
