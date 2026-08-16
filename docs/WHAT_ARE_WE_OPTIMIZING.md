@@ -490,6 +490,12 @@ Three things make this the most attractive remaining option:
    teammates is in the nflverse `weekly` table; the correlation can be estimated
    directly and dropped into `build_samples` as a covariance structure.
 
+> **SUPERSEDED 2026-08-16 by V7 (§15).** The reasoning above is wrong in its
+> final step. Stacking raises variance, and variance was measured to *hurt* a
+> good team badly in this format — and a real playoff bracket makes it worse,
+> not better, which is the opposite of what this section predicted. C2 is
+> retired as an edge source. Read §15 before acting on anything here.
+
 **Recommendation: B, then C2.** B is cheap and makes the negative result rigorous.
 C2 is the only untried thing with an actual mechanism for raising P(title).
 
@@ -586,3 +592,196 @@ comparison — but it is suggestive, not demonstrated.
 
 The overall diagnosis survives, because it rests mainly on the first two tiers.
 But the number leaned on most in conversation is the flimsiest one.
+
+---
+
+## 14. V5 and V6 — the last two cheap feature classes
+
+### V5 — schedule and matchup (Matt's hypothesis #3, finally tested)
+
+V4 was supposed to test team environment and failed: it guessed a column name and
+`team_weekly` has no points column. It *does* have `opponent_team`, and so does
+`weekly`, so the schedule is fully recoverable.
+
+All features are **ex-ante**: prior-season defensive quality combined with this
+season's published schedule. The NFL schedule is released in May and ADP settles
+in July/August, so the market has seen it.
+
+**Clustered by team-season** — a schedule is a property of a team, so twelve
+receivers on one roster are *one* observation, not twelve. V4 did not cluster.
+
+```
+feature             corr  clustered       t      n  teams
+sos_all           +0.045     +0.078   +0.87    614    128
+sos_playoff       +0.019     +0.056   +0.63    614    128
+div_repeat        -0.048     -0.039   -0.41    553    115
+team_off_prior    -0.009     +0.007   +0.08    614    128
+```
+
+**KILLED.** Nothing clears |t| ≥ 2. The largest position cell is WR `sos_playoff`
+at +1.90, and across 16 cells one near 1.9 is what chance produces. Note
+`team_off_prior` — the feature V4 failed to load — is the flattest of the four.
+
+### V6 — usage and opportunity
+
+The strongest remaining candidate on theory: production = opportunity ×
+efficiency, and opportunity persists while efficiency does not. A market
+anchored on last season's *points* should misprice a player whose points came
+from unsustainable efficiency on modest volume.
+
+The test that matters is the **residualized** one — usage minus what the
+player's draft rank already implies. Raw usage correlates with the residual
+trivially, because good players get volume *and* get drafted early. SEs
+bootstrapped over **players**, since the same players recur across four seasons.
+
+```
+feature           positions          raw    resid     se      t     n  plyrs
+target_share      RB/WR/TE        +0.090   +0.082  0.046  +1.78   457    203
+touches_pg        RB/WR/TE        +0.038   +0.090  0.054  +1.68   457    203
+targets_pg        RB/WR/TE        +0.085   +0.069  0.045  +1.52   457    203
+wopr              RB/WR/TE        +0.071   +0.066  0.048  +1.36   457    203
+carries_pg        RB              +0.136   +0.076  0.081  +0.93   165     77
+air_yards_share   WR/TE           +0.020   +0.029  0.068  +0.43   292    126
+```
+
+**KILLED by the pre-registered criterion, but this is the closest thing to a
+signal the project has produced.** All six features positive; RB and WR cells
+uniformly positive (+1.26 to +1.52); the direction is theoretically predicted.
+
+The caveat that stops it being a finding: `targets_pg`, `target_share`, `wopr`
+and `touches_pg` are near-duplicates. Six correlated measures of one thing
+agreeing is **one test at t ≈ 1.7**, not six pieces of evidence. And r ≈ 0.08
+explains 0.6% of residual variance.
+
+Honest label: **not established**, rather than established null. The one lane
+where doubling the seasons (§12) could change the answer.
+
+---
+
+## 15. V7 — what the head-to-head format actually rewards
+
+20,000 simulated seasons, 12 teams, weekly scores Gamma-distributed so that the
+mean is held *exactly* constant while the spread varies.
+
+### A. Head-to-head is not a thin veneer over total points
+
+With all twelve teams **identical**:
+
+```
+mean Spearman(H2H rank, total-points rank)    +0.647
+the highest-scoring team wins the league       41.5%
+the highest-scoring team makes the playoffs    92.2%
+schedule luck, sd of (actual - all-play wins)  1.45 wins
+```
+
+The best-scoring team wins the league less than half the time, and who you were
+scheduled against is worth roughly **±2.8 wins of a 14-game season**.
+
+**Methodological consequence: rank is a noisy readout of roster quality, and we
+have measured everything in ranks.** `points_for` is a far higher-power statistic
+for deciding whether one strategy beats another. Rank is what you care about;
+points-for is what you should test on.
+
+### B. Variance helps only underdogs
+
+```
+              cv     sd   P(playoff)  mean rank   P(title)lot   P(title)brk
+underdog    0.12   11.8       0.148       9.55         0.018         0.012
+  (-8%)     0.40   39.4       0.207       9.12         0.026         0.019
+average     0.12   12.8       0.548       6.11         0.090         0.100
+  ( 0%)     0.40   42.8       0.418       7.22         0.068         0.057
+favourite   0.12   13.9       0.888       3.08         0.221         0.297
+  (+8%)     0.40   46.2       0.634       5.37         0.128         0.126
+```
+
+Variance helps the underdog and **badly hurts a good team** (P(playoffs)
+0.888 → 0.634). The analytic claim made in §11 holds.
+
+### C. Correction — the playoff bracket makes variance WORSE, not better
+
+§8 and §11 claimed the `1/seed` lottery "deletes the mechanism by which stacking
+would pay off," and that a real bracket would reward a boom roster. **That was
+wrong.** For the favourite, cv 0.12 → 0.40 costs:
+
+- lottery: 0.221 → 0.128, **−42%**
+- bracket: 0.297 → 0.126, **−58%**
+
+The bracket *amplifies* variance effects in both directions — it helps the
+underdog more (+58% vs +44%) and hurts the favourite more. A bracket is a
+sequence of head-to-head games, and variance pushes each toward a coin flip, so
+a favourite wants *less* of it.
+
+The error was importing DFS tournament logic, which applies when you need the top
+0.1% of a huge field. In a 12-team league a decent roster already holds **22–30%**
+title odds — you are the favourite.
+
+**Consequence for stacking.** QB1–WR1 weekly correlation of +0.357 works out to
+~4–7% more team weekly sd. Reading that off the favourite row (cv 0.22 → 0.30
+costs bracket P(title) 0.218 → 0.176), a stack costs roughly **1–2 points of
+absolute title probability**. Small, wrong sign. If the covariance model gets
+built, it is to *avoid* stacking, not to seek it.
+
+---
+
+## 16. B1 — is `U` just a monotone transform of the board?
+
+The gate check for everything downstream. Rosters swept across a quality
+spectrum against a **fixed** opponent field, so only our roster moves.
+
+```
+target        predictor          linR2  spearman   monoR2
+U             proj_starters      0.910     0.979    0.945
+U             proj_total         0.901     0.943    0.883
+p_playoffs    proj_starters      0.923     0.977    0.932
+p_title       proj_starters      0.839     0.964    0.928
+mean_rank     proj_starters      0.954    -0.981    0.914
+```
+
+Spearman **0.979** against summed starter projections. But a tight monotone fit
+across a *wide* range proves nothing about the margin, and the margin is the
+entire decision — a pick chooses between rosters differing by one ADP-adjacent
+player. So B1b re-ran it under range restriction and converted `U`'s residual
+into board units.
+
+```
+roster population        n  sd(proj)  spearman   linR2   U noise = N pts
+wide (random..best)    250       142     0.979   0.913              44
+competent              250        59     0.914   0.879              22
+near-optimal           250        38     0.853   0.745              22
+
+one shortlist swap is worth ~3 projected points
+```
+
+**`U`'s noise is 6.7× the size of the decision it is asked to make.** So E2's
+result — the argmax no better than random at the pick level — is not a surprising
+empirical finding. It is what this ratio forces.
+
+### B1c — is that residual structure or noise?
+
+The same 150 rosters under three independent draws of the season. Structure
+replicates across draws; noise does not.
+
+```
+seed 0 vs 1   0.578
+seed 0 vs 2   0.394
+seed 1 vs 2   0.565
+mean          0.513
+```
+
+**Mixed: ~51% of the residual variance is real, reproducible structure**
+(positional balance, bench depth, injury interaction — things a plain sum misses),
+~49% is an artifact of which 400 seasons were drawn.
+
+So `U` is **not** simply degenerate. But both halves operate at ~5× the scale of
+a single pick (≈16 points of structure, ≈15 of noise, against a 3-point decision),
+and at the margin an argmax cannot tell them apart. It chases both.
+
+**Cross-check.** Resolving a 3-point difference against ~15 points of noise needs
+about (15/3)² ≈ 25 replicates per candidate. The search runs 1–2. That
+independently reproduces F3's "~23× under-sampled" figure, which was derived from
+a completely different measurement.
+
+**What this does and does not license.** More samples would remove the noise half
+but not the scale problem, and the structure half is about roster *shape*, not
+about which of two similar players to take. So sampling harder does not turn `U`
+into a pick-ranker.
