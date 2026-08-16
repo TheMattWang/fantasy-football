@@ -132,25 +132,90 @@ def rank_waiver_adds(
     return results[:top]
 
 
+def observed_to_date(
+    season: int, through_week: int, *, scoring: Optional[Dict[str, float]] = None
+) -> pd.DataFrame:
+    """Points scored and games played so far this season, per player.
+
+    Games played is the count of weeks with a stat line, not the count of weeks
+    with positive points: a player can suit up and score nothing, and treating
+    that as a missed game would conflate a bad performance with an injury.
+    """
+    from ..data import nflverse
+    from ..projections.ecr import normalize_name
+
+    weekly = nflverse.weekly_fantasy([season], scoring)
+    weekly = weekly[weekly["week"] <= through_week]
+    name_col = ("player_display_name" if "player_display_name" in weekly.columns
+                else "player_name")
+    weekly = weekly.assign(name_key=weekly[name_col].map(normalize_name))
+
+    grouped = weekly.groupby("name_key")
+    return pd.DataFrame({
+        "points": grouped["fantasy_points"].sum(),
+        "games": grouped["week"].nunique(),
+    }).reset_index()
+
+
+def blended_scores(
+    samples: SampleSet,
+    observed: Optional[pd.DataFrame],
+    *,
+    prior_games: float = 4.0,
+) -> np.ndarray:
+    """Preseason projection updated by what has actually happened.
+
+    The same estimator the season simulation uses
+    (:func:`src.simulation.season._reactive_estimate`), so the lineup this tool
+    recommends is the lineup the objective assumes you will set. Without it both
+    are frozen at the preseason number, and T3 measured that gap at **+1.523
+    ranks** -- larger than any draft edge this project has been able to find.
+
+    Players with no observed rows keep their projection, which is correct: a
+    rookie who has not played yet has nothing to update on.
+    """
+    from ..projections.ecr import normalize_name
+
+    scores = np.asarray(samples.decision_score, dtype=np.float64).copy()
+    if observed is None or observed.empty or prior_games <= 0:
+        return scores
+
+    lookup = observed.drop_duplicates("name_key").set_index("name_key")
+    keys = samples.players["player_name"].astype(str).map(normalize_name)
+    points = keys.map(lookup["points"]).to_numpy(dtype=float)
+    games = keys.map(lookup["games"]).to_numpy(dtype=float)
+
+    seen = ~np.isnan(games)
+    scores[seen] = ((prior_games * scores[seen] + points[seen])
+                    / (prior_games + games[seen]))
+    return scores
+
+
 def best_lineup(
     roster: Sequence[str],
     samples: SampleSet,
     config: LeagueConfig,
     *,
     week: int = 1,
+    observed: Optional[pd.DataFrame] = None,
+    prior_games: float = 4.0,
 ) -> Dict[str, List[str]]:
     """Optimal starters for one week, chosen ex ante from projections.
 
     Deliberately the same slot logic the season simulation uses, so the lineup
     the tool recommends is the lineup the objective assumed you would set.
+
+    Pass ``observed`` (from :func:`observed_to_date`) to rank by what has
+    actually happened rather than by the August projection. Without it this
+    returns the same lineup in week 14 as in week 1 -- ``week`` was previously
+    accepted and silently ignored, which looked like in-season logic and was not.
     """
     rows = [samples.index[p] for p in roster if p in samples.index]
     if not rows:
         return {}
 
-    scores = {
-        int(row): float(samples.decision_score[row]) for row in rows
-    }
+    ranking = blended_scores(samples, observed, prior_games=prior_games)
+    scores = {int(row): float(ranking[row]) for row in rows}
     positions = {
         int(row): str(samples.players["position"].iloc[row]) for row in rows
     }
@@ -195,29 +260,42 @@ def start_sit(
     config: LeagueConfig,
     *,
     week: int = 1,
+    observed: Optional[pd.DataFrame] = None,
+    prior_games: float = 4.0,
 ) -> pd.DataFrame:
-    """Per-player start/sit call with the projection behind it."""
-    lineup = best_lineup(roster, samples, config, week=week)
+    """Per-player start/sit call, showing what moved it.
+
+    ``proj_ppg`` is the August number; ``rate`` is that number updated by the
+    season so far; ``delta`` is the difference. A large negative delta on a
+    starter is the bust you would otherwise keep starting out of habit.
+    """
+    lineup = best_lineup(roster, samples, config, week=week,
+                         observed=observed, prior_games=prior_games)
     starters = {
         name: slot
         for slot, names in lineup.items()
         if slot != "BN"
         for name in names
     }
+    ranking = blended_scores(samples, observed, prior_games=prior_games)
 
     rows = []
     for player in roster:
         row = samples.index.get(player)
         if row is None:
             continue
+        projected = float(samples.decision_score[row])
+        rate = float(ranking[row])
         rows.append(
             {
                 "player": player,
                 "position": str(samples.players["position"].iloc[row]),
-                "proj_ppg": float(samples.decision_score[row]),
+                "proj_ppg": projected,
+                "rate": rate,
+                "delta": rate - projected,
                 "slot": starters.get(player, "BN"),
                 "start": player in starters,
             }
         )
     frame = pd.DataFrame(rows)
-    return frame.sort_values(["start", "proj_ppg"], ascending=[False, False])
+    return frame.sort_values(["start", "rate"], ascending=[False, False])
