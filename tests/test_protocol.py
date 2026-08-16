@@ -243,7 +243,27 @@ def test_the_checked_in_registry_is_valid_and_records_the_spent_budget():
     """
     registry = load_registry()
     assert isinstance(registry["experiments"], dict)
-    assert protocol.touches_spent(registry) >= MAX_GATE_TOUCHES
+
+    # The 2024/2025 budget is over and must stay recorded as over.
+    assert protocol.touches_spent(registry, GATE_SEASONS) >= MAX_GATE_TOUCHES
+
+    # Every entry states a hypothesis. Touches are NOT required: the registry
+    # now holds pre-registrations for the sealed seasons as well as the record
+    # of spent ones, and an entry with an empty touch list is the correct shape
+    # for a hypothesis committed before its run -- which is the entire point of
+    # committing it.
     for name, entry in registry["experiments"].items():
         assert entry["hypothesis"], f"{name} has no recorded hypothesis"
-        assert entry["touches"], f"{name} claims no touches"
+        assert isinstance(entry["touches"], list), f"{name} has a malformed ledger"
+        for touch in entry["touches"]:
+            assert touch.get("season"), f"{name} has a touch with no season"
+
+
+def test_a_sealed_pre_registration_exists_and_is_unspent():
+    """The seal is worth something exactly once, so what it will be spent on is
+    committed in advance rather than decided after seeing a number."""
+    registry = load_registry()
+    assert protocol.touches_spent(registry, SEALED_SEASONS) <= MAX_SEALED_TOUCHES
+    pending = [name for name, entry in registry["experiments"].items()
+               if not entry["touches"]]
+    assert pending, "no pre-registered experiment is waiting on the seal"

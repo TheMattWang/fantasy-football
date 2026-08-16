@@ -41,11 +41,19 @@ def build_comparison(
     train_seasons: Sequence[int],
     *,
     scoring: Optional[Dict[str, float]] = None,
+    history: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    """One row per held-out-season player with both projections and the outcome."""
-    curve = fit_baseline(train_seasons, scoring=scoring)
+    """One row per held-out-season player with both projections and the outcome.
 
-    snapshot = preseason_snapshot(holdout)
+    ``history`` anchors the board on something other than ECR --
+    ``ffc_adp.as_ecr_history`` supplies market ADP in the same schema, which is
+    what reaches the sealed 2019-2021 seasons. It must feed the curve as well as
+    the snapshot: anchoring the two halves on different rank systems would make
+    the residual meaningless.
+    """
+    curve = fit_baseline(train_seasons, scoring=scoring, history=history)
+
+    snapshot = preseason_snapshot(holdout, history=history)
     snapshot["pred_ecr"] = [
         curve.ppg_at(pos, rank)
         for pos, rank in zip(snapshot["pos"], snapshot["pos_rank"])
