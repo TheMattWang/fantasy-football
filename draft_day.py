@@ -44,6 +44,7 @@ say it should not be.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -208,6 +209,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="fewer rollouts; use if picks are timing out")
     parser.add_argument("--season", type=int, default=2026,
                         help="only used in the rebuild hint on a stale board")
+    parser.add_argument("--save-roster", default="data/processed/my_roster.txt",
+                        help="write our roster here when the draft ends, so "
+                             "week.py can read it. Pass '' to skip.")
     parser.add_argument("--allow-stale", action="store_true",
                         help="draft against a stale or incomplete board anyway. "
                              "Staleness is fatal by default: consensus moves "
@@ -346,6 +350,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print("\nfinal roster:")
     print_roster(sim, our_team)
+
+    # The connective tissue between draft day and the rest of the season. Without
+    # this the roster only ever exists in the terminal scrollback, and week.py has
+    # nothing to read.
+    if args.save_roster:
+        rows = sim.rosters[our_team]
+        out = Path(args.save_roster)
+        tmp = out.with_suffix(out.suffix + ".tmp")
+        tmp.write_text("\n".join(str(board.names[r]) for r in rows) + "\n")
+        os.replace(tmp, out)
+        print(f"\nwrote {out} ({len(rows)} players)")
+        print(f"set your lineup each week with:\n"
+              f"  python week.py --roster {out} --week <N>")
     return 0
 
 
