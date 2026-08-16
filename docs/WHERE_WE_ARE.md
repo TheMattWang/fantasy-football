@@ -1,7 +1,14 @@
 # Where this project actually stands
 
-Written 2026-08-09. Read this first if you have lost the thread. It assumes no
-memory of previous sessions and explains every term it uses.
+Written 2026-08-09, sections 9 onward rewritten 2026-08-16. Read this first if
+you have lost the thread. It assumes no memory of previous sessions and explains
+every term it uses.
+
+**Sections 1–8 are the original diagnosis and still hold. Sections 9–14 are the
+current state, and the project has changed shape since 1–8 were written**: the
+conclusion is no longer "the search is broken" but "there is no valuation edge to
+search for, and the draft was the smaller decision anyway." Section 9 is the
+bridge.
 
 ---
 
@@ -14,8 +21,16 @@ what started the rebuild.
 The plan was a research build: port the simulator to run on a GPU, then try four
 different machine-learning approaches against the same test, and see which wins.
 
-**That plan is currently on hold, for a reason that is now measured rather than
-suspected.** Sections 5 and 6 explain why.
+**That plan is abandoned, not paused, and for a measured reason.** Sections 5 and
+6 explain the first half — optimizing the objective harder made things
+monotonically worse. Section 9 explains the second and more decisive half: the
+board carries no information the market does not already have, so there is
+nothing for any of the four approaches to learn. All four optimize the same
+objective over the same inputs.
+
+What the project actually produced instead is a draft-day tool that follows
+consensus and knows why, an in-season tool for the larger decision, and a
+replicated demonstration of the optimizer's curse.
 
 ---
 
@@ -297,164 +312,184 @@ year." **Treat n = 4 as the real sample size for any claim about the future.**
 
 ---
 
-## 9. Exactly where we are
+## 9. What we found after the diagnosis
 
-### Stage status
+Sections 5–8 explain why the agent lost. Everything below was measured after
+that, and it changed the shape of the project rather than just adding detail.
 
-| item | state |
+### There is no valuation edge, and there was never going to be one
+
+The board's within-position ordering **is** the expert consensus, by
+construction: `proj_ppg = curve.ppg_at(position, pos_rank)`, so no player
+identity enters at all. We cannot disagree with the experts about which running
+back is better. The only thing we add is the cross-position exchange rate, and
+V1 measured that as already correct.
+
+So the honest description is not "our price is wrong." It is **we do not have a
+price.** Eight experiments looked for one:
+
+| test | question | result |
+|---|---|---|
+| V1 | is the curve systematically biased? | 3% systematic, 97% idiosyncratic. Refuted |
+| V2 | is any position's bias stable? | only RB; QB/WR/TE flip sign yearly |
+| V3 | when we deviate from market, are we right? | **t = −2.07. Negative** |
+| V4 | rookies, draft capital, age, injuries | only injury history (t = −2.58), and it implicates *our* model |
+| V5 | schedule, matchup, team offence | all null, largest t = 0.87 |
+| V6 | usage as a draft signal | t = 1.78, short of the bar |
+| V8 | usage as an *in-season* signal | predicts at t = 6.10; worth +0.9 points a season |
+
+The one number that matters most is V3: our deviations from consensus have
+historically been **worse** than consensus, not merely no better.
+
+### The +22.4 was never a win over ECR
+
+`validate.py` compares our board against **last season's points per game** —
+naive persistence. That says the experts beat a stale box score, which is their
+result, not ours. Within a position, beating ECR is definitionally a tie. And
+`need_adp` *is* the ECR baseline, so the ceiling experiment already **was** the
+"do we beat consensus?" test. It came back no.
+
+### The draft is the smaller decision
+
+| lever | value, in places |
 |---|---|
-| 0a FLEX hindsight fix | done |
-| 0b determinism | done |
-| 0c common random numbers | done |
-| 0d realistic opponents | done |
-| 0e ceiling experiment | done — **failed its own bar** |
-| 0f gate protocol enforcement | done — `src/evaluation/protocol.py` + `gate_registry.json` |
-| 0g checkpointing | done |
-| Stage 1 (GPU port) and all four ML arms | **on hold** |
+| one draft pick, perfectly made | **0.041** |
+| a realistic draft improvement (median → 90th pct) | **0.832** |
+| a realistic in-season policy (frozen → reacting) | **1.523** |
+| schedule luck, with twelve identical teams | rank sd **3.49** |
 
-Stage 0 carried a pre-registered stopping rule: *if the best-case search gains
-less than +0.35 places, stop and write it up.* It came in at **-1.667**. The rule
-fired. We stopped, and `docs/OBJECTIVE_DIAGNOSIS.md` is the write-up.
+And the 0.832 is not available to us — with no valuation edge, consensus is
+already the right draft, so **our** realistic draft improvement is about zero.
+The 1.523 is fully available, because reacting to what already happened requires
+no edge over anybody.
 
-So the project is **past the rebuild stage but not into Stage 1**. The work in
-front of us is a repair stage the original plan did not have a name for.
+### Estimation is not selection — twice
 
-### Two things are open and neither is optional
+The board has a real **estimation** edge (+22.4 pts/pick over persistence) and no
+**selection** edge, because picking the maximum of eight near-identical noisy
+estimates selects the error rather than the player.
 
-**The league settings are still guesses.** There is no Yahoo credential file, so
-everything runs on a placeholder config (`league_id: "PROVISIONAL"`), assuming
-12 teams, half-PPR, and a particular roster shape. Roster shape *is* positional
-scarcity — if your league runs 3 receivers, or two flex slots, or full PPR, the
-valuations move. Every number in this document was computed on a guess. **This
-requires you; it needs a browser login.**
+V8 then produced the same shape independently: opportunity predicts next week's
+points at t = +6.10, and changes which players you start worth +0.072 points per
+week — winning under half the time. A large estimation effect, no selection
+effect. Any future claim in this project has to be tested on the decision, not on
+the prediction.
 
-**The holdout is already spent. This document previously said otherwise, and
-that was wrong.**
+---
 
-Building the enforcement code turned up five replay artifacts sitting in
-`data/processed/`: `replay_2024_full.csv` and `replay_2025_full.csv` (360
-replicates each — the original v2 gate, which is where the +0.253 / +0.161
-numbers in section 1 came from), `replay_2025.csv` (120 replicates, four
-policies), and `replay_2024_clean.csv` / `replay_2025_crn.csv` (144 replicates
-each, the post-FLEX-fix re-run quoted as +0.485). That is **five touches against
-a budget of three**, and it means 2024/2025 have been iterated on rather than
-held out.
+## 10. What is actually built and working
 
-The registry was seeded from those artifacts rather than reset, so the code now
-tells the truth and refuses further gate runs:
+| tool | state |
+|---|---|
+| `draft_day.py` | **ships consensus.** Recommends `need_adp`; the simulation fills the table as context and its disagreements are printed but not acted on. `--recommender season_sim` restores the old behaviour |
+| board refresh | `--refresh` now works. It previously did **nothing** — the flag was plumbed nowhere, so the board silently sat a week stale with no market ADP |
+| freshness gate | fatal on draft day, a warning for research. `draft_day.py` refuses a stale board |
+| `week.py` | **new.** The in-season half: ranks the roster by the preseason projection updated with results through week N−1 |
+| gate protocol | enforced in code; the holdout budget is spent and the ledger says so |
+
+226 tests, about 8 seconds, run from the repo root.
+
+---
+
+## 11. Where we are, honestly
+
+The project set out to draft better than consensus. It cannot, and that is now a
+measured result rather than a failure to try: eight independent searches for a
+valuation edge came back null or negative, and the mechanism for why optimizing
+harder makes things worse is understood and replicated.
+
+What that leaves is genuinely worth having:
+
+1. **A draft-day tool that reflects what was measured** rather than what was
+   hoped — it follows consensus and shows its own disagreements without obeying
+   them.
+2. **An in-season tool**, which is where the larger decision actually lives.
+3. **A clean demonstration of the optimizer's curse** in a live sequential
+   decision problem, with a monotone dose-response curve, a hindsight
+   decomposition isolating the channel, and a second independent instance of the
+   estimation-versus-selection distinction. That is the more interesting output
+   than a drafting agent would have been.
+
+### Two things still open
+
+**The league settings are still guesses.** No Yahoo credentials, so everything
+runs on a placeholder config assuming 12 teams, half-PPR and a particular roster
+shape. Roster shape *is* positional scarcity — every VORP in this document rests
+on that guess. Deferred by choice; the cost is stated here so it stays visible.
+
+**The holdout is spent.** Five replay artifacts against a budget of three, found
+on disk and now pinned in the registry. Replayable seasons are only 2022–2025
+because ECR history starts 2021. FFC ADP goes back to 2012 and an ADP-anchored
+board does not need ECR, so **2018–2021 is buildable** and is the only route to a
+clean test — that, or a prospective run in the actual 2026 season.
+
+---
+
+## 12. What to do about the 2026 draft
+
+**Run `draft_day.py` as it now stands.** It already does the measured-correct
+thing: recommends consensus, shows the simulation's disagreement, and refuses to
+start on a stale board.
+
+Before draft day:
 
 ```
-GateError: the holdout budget is spent: 5/3 touches already recorded
-({'v2_gate_original': 2, 'early_multi_policy': 1, 'post_flex_fix': 2}).
-2024/2025 are burned; any further evaluation against them is tuning, not a test.
+python -m src.projections.board --season 2026 --refresh --require-market \
+    --out data/processed/board_2026.csv
+python draft_day.py --slot <your pick>
 ```
 
-The mechanism itself works as designed: `replay_season` refuses holdout seasons
-under the default `protocol="tune"`, a `protocol="gate"` run needs a
-`--register` name already committed to `gate_registry.json` with its hypothesis
-written down, and the ledger is checked in so spending a touch shows up in a
-diff. It simply arrived after the budget was gone.
+The refresh matters more than it sounds: the board is rebuilt from caches unless
+`--refresh` is passed, and until this was fixed the flag did not exist. Install
+the LaunchAgent in `scripts/` to make it happen daily.
 
-**What this costs.** Any future number measured on 2024/2025 is tuning, not
-evidence — the seasons have seen enough iteration that a good result on them no
-longer distinguishes a real edge from a fitted one. The honest remaining option
-is a **prospective** test: run the agent in the actual 2026 season and see. That
-cannot be contaminated, and it is the only clean test left. It also means the
-+0.485 post-FLEX-fix figure should be read as a tuning result, not a gate pass.
+Then during the season:
 
----
+```
+python week.py --week <N>
+```
 
-## 10. What happens next
-
-| # | task | why | blocked by |
-|---|---|---|---|
-| 9 | Measure projection error by position and ADP tier | the central quantity, never yet measured. The whole optimizer's-curse story rests on how wide it is. Cheap: pure data analysis, no simulation | — |
-| 10 | Cross-entropy season-transfer matrix | scores how surprised the model is by what really happened. Fits the error width properly, and its decay across seasons gives *measured* weights for how far back history is useful | — |
-| 11 | Add shrinkage and pessimism to the decision rule, re-run the ceiling | the actual fix (below) | 9, 10 |
-| 8 | Run the robustness harness | built with 9 passing tests, never actually executed | — |
-
-Task 9 is also a genuine test of the diagnosis: if projection error turns out to
-be *small* relative to the gaps between candidates, the optimizer's-curse
-explanation is wrong and we would want to know that before building task 11.
-
-### The fix, in plain terms
-
-1. **Lean on the market when unsure.** Rank candidates by a blend of our
-   projection and ADP, weighted by how much error each carries, instead of by
-   our projection alone.
-2. **Penalize uncertainty.** Score each candidate as its value *minus* a
-   multiple of how uncertain that value is. Standard practice in offline RL —
-   CQL and MOPO are published algorithms doing exactly this, for exactly this
-   failure.
-3. **Let the model know its projections may be off-centre.** Today the simulator
-   says "outcomes vary around my projection." It must also say "and my
-   projection's centre may itself be wrong, by about this much, and by more for
-   some positions than others."
-
-Tasks 9 and 10 measure the numbers that steps 1 and 2 need. Without them, both
-are guesses.
-
-**Important caveat:** arm2's +3.312 is a *cheat* — it uses hindsight. It bounds
-what perfect valuation would be worth. How much of that is achievable without
-hindsight is completely unknown, and re-running the ceiling with the repaired
-rule is the only way to find out. The four ML arms stay on hold until it clears.
+which is where the larger of the two decisions actually is.
 
 ---
 
-## 11. What to do about the actual 2026 draft
-
-Drafts are roughly three weeks out. The measured answer:
-
-**Use the projections board with `need_adp`, and leave the season-simulation
-search switched off.**
-
-- the board beats consensus at projecting: **+22.4 points per pick**, 4 of 4
-  seasons, t = 2.60
-- the search is measured *worse* than not searching: **-2.594 places**
-
-You take the part that works and skip the part that does not. This also matches
-the rule already written in `RUNBOOK.md`: nothing learned replaces `need_adp` on
-draft day until it passes the held-out test, and draft day runs locally and
-offline.
-
-Do get the real league settings pulled first (section 9).
-
----
-
-## 12. Where things live
+## 13. Where things live
 
 | path | what |
 |---|---|
-| `src/projections/board.py`, `ecr.py` | builds the player projections. **This is the part that works.** |
-| `src/simulation/season.py` | simulates a season and computes U. Where the FLEX bug lived |
-| `src/simulation/distributions.py` | player uncertainty model. **Where the fix in section 10 goes** |
-| `src/draft/engine.py`, `opponents.py` | the draft itself and the simulated drafters |
+| `src/projections/board.py`, `ecr.py` | builds the board. Also the freshness provenance |
+| `src/simulation/season.py` | season simulation, `U`, and `_reactive_estimate` |
+| `src/simulation/distributions.py` | the three-layer player uncertainty model |
+| `src/draft/engine.py`, `opponents.py` | the draft and the simulated drafters |
 | `src/draft/search.py` | the policies: `need_adp`, the season-sim agent, the shortlist |
-| `src/evaluation/replay.py` | replays a draft against a real season. The scorekeeper |
-| `src/evaluation/objective_check.py` | E2 lives here |
-| `src/evaluation/robustness.py` | built, 9 tests, never run (task 8) |
-| `src/data/league_config.py` | the placeholder config problem in section 9 |
-| `src/data/ffc_adp.py` | real ADP data, added during 0d |
-| `draft_day.py` | the offline draft-day tool |
-| `docs/OBJECTIVE_DIAGNOSIS.md` | the formal technical write-up of sections 5–8 |
-| `RUNBOOK.md` | the operating rules |
-| `tests/` | 141 tests, ~5 seconds, run from the repo root |
+| `src/inseason/waivers.py` | start/sit, waiver valuation, `blended_scores` |
+| `src/evaluation/replay.py`, `protocol.py` | the scorekeeper and the holdout enforcement |
+| `src/data/assertions.py` | board validation **and** `validate_freshness` |
+| `src/data/ffc_adp.py` | real market ADP and dispersion |
+| `draft_day.py` | draft-day tool. Offline by design |
+| `week.py` | in-season start/sit tool. Allowed online |
+| `experiments/` | every worker script, so the numbers are rerunnable |
+| `docs/WHAT_ARE_WE_OPTIMIZING.md` | the full walkthrough of what is wrong and why |
+| `docs/findings/` | one file per experiment, each with a KEPT/KILLED verdict |
+| `scripts/` | the daily board refresh and its LaunchAgent |
 
 Legacy from the previous version — `test_final/`, `test_colab_v2/`,
-`model_weights/`, `deployment/colab_gpu/`, the assorted root-level
-`*_draft_assistant.py` scripts — is not part of the rebuild and is scheduled for
-deletion. Do not take anything in those as current.
+`model_weights/`, `deployment/colab_gpu/`, the root-level `*_draft_assistant.py`
+scripts — is not part of the rebuild. Do not take anything in those as current.
 
 ---
 
-## 13. The one-paragraph version
+## 14. The one-paragraph version
 
-The projections are good and beat consensus. The season simulator and search
-machinery both work. But the program picks by taking the highest-scoring option
-among 8 near-identical candidates, and because its projection errors are larger
-than the real gaps between those candidates, that maximum mostly selects its own
-mistakes — so optimizing harder makes it monotonically worse, and it currently
-loses to simply following consensus. The fix is not a better optimizer; it is a
-decision rule that accounts for how uncertain its own numbers are. Measuring
-that uncertainty is the next step, and the machine-learning work stays parked
-until it is done.
+The projections are a faithful repackaging of expert consensus, which means they
+are good and also that they contain no information the market does not already
+have — eight experiments looked for some and found none, and where we do deviate
+from consensus we have historically done worse. On top of that, picking the
+highest-scoring of eight near-identical candidates selects our own projection
+error, so optimizing harder made the agent monotonically worse than simply
+following consensus. Draft day therefore now follows consensus, and the search
+runs only as commentary. The more useful discovery is that the draft was the
+smaller decision all along: a realistic in-season start/sit policy is worth about
+1.5 places against roughly zero for any draft improvement available to us, so
+`week.py` is where the remaining value is. The market is efficient, the reason
+effort made it worse is understood and replicated, and that is the result.
