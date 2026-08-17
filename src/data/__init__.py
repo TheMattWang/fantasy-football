@@ -4,7 +4,6 @@ from .assertions import (
     BoardReport,
     BoardValidationError,
     validate_board,
-    validate_players,
 )
 from .league_config import (
     LeagueConfig,
@@ -18,7 +17,6 @@ __all__ = [
     "BoardReport",
     "BoardValidationError",
     "validate_board",
-    "validate_players",
     "LeagueConfig",
     "LeagueConfigError",
     "available_configs",

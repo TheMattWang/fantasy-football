@@ -1,32 +1,27 @@
+"""Fantasy football draft and in-season tooling.
+
+Two entry points, both at the repo root:
+
+    draft_day.py    offline draft assistant. Recommends consensus; the season
+                    simulation fills the table as context and its disagreements
+                    are shown but not acted on.
+    week.py         in-season start/sit. Ranks the roster by the preseason
+                    projection updated with results through last week.
+
+The packages, in the order data flows through them:
+
+    data          ingestion -- nflverse, FantasyPros ECR, FFC market ADP,
+                  league config, and the board validators
+    projections   consensus rank -> points curve, the board, and validation
+    simulation    player uncertainty and the head-to-head season
+    draft         the draft engine, opponent models, and the search policies
+    inseason      start/sit and waiver valuation
+    evaluation    replay against real seasons, plus the holdout protocol
+
+Deliberately empty of imports. This module used to eagerly pull in a v1 MCTS
+and injury-modelling cluster, so every `import src.anything` executed it --
+including in tests, and including after the code it advertised had been
+superseded. Nothing imports the package root, so nothing here needs to.
 """
-Fantasy Football Draft Strategy Package
-======================================
 
-A comprehensive package for fantasy football draft strategy including:
-- MCTS-based draft optimization
-- Injury risk modeling
-- Rookie performance prediction
-- Player valuation and ranking
-
-Quick Start:
-    from src.strategies import MCTSStrategy
-    from src.utils import load_default_data
-    
-    data = load_default_data()
-    strategy = MCTSStrategy()
-    pick = strategy.make_pick(draft_state)
-"""
-
-__version__ = "2.0.0"
-__author__ = "Fantasy Football MCTS Team"
-
-# Main imports for easy access (only import what exists)
-from src.core.player import Player, PlayerPool
-from src.core.draft import DraftState, LeagueSettings
-from src.utils.data_loader import load_default_data, load_injury_enhanced_data
-
-__all__ = [
-    'Player', 'PlayerPool', 
-    'DraftState', 'LeagueSettings',
-    'load_default_data', 'load_injury_enhanced_data'
-]
+__version__ = "3.0.0"

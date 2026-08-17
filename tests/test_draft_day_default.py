@@ -166,3 +166,29 @@ def test_scarcity_advice_fires_when_our_pick_is_likely_to_last():
 
     assert "PICK: Bravo" in out
     assert "consider taking Alpha first" in out
+
+
+# --- the roster file must never be clobbered ------------------------------
+
+def test_quitting_before_any_pick_does_not_erase_the_roster_file(tmp_path, monkeypatch):
+    """Found the hard way: --save-roster wrote an empty file when the draft was
+    quit before the first pick, destroying a roster saved in an earlier session.
+    An empty file is not a draft, it is a lost one.
+
+    `input` is patched rather than piped: draft_day catches EOFError to mean
+    "the user is done", but pytest raises OSError when stdin is read under
+    capture, so a pipe would test the wrong path.
+    """
+    roster = tmp_path / "my_roster.txt"
+    original = "Ja'Marr Chase\nBijan Robinson\n"
+    roster.write_text(original)
+
+    monkeypatch.setattr("builtins.input", lambda *a: (_ for _ in ()).throw(EOFError))
+
+    code = draft_day.main([
+        "--slot", "1", "--samples", "20", "--candidates", "3", "--fast",
+        "--save-roster", str(roster), "--allow-stale",
+    ])
+
+    assert code == 0
+    assert roster.read_text() == original

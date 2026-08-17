@@ -35,10 +35,11 @@ Then pull the league:
 ```
 
 **Why this matters more than it looks.** Replacement level depends on roster
-slots, and every VORP on the board depends on replacement level. The repo
-currently has three hardcoded league configs and two of them disagree
-(`clean.py` says half-PPR, `src/core/scoring.py` says full PPR). Until the pull
-lands, everything runs on `PROVISIONAL` settings and says so loudly.
+slots, and every VORP on the board depends on replacement level. There used to
+be three hardcoded league configs, two of them disagreeing about whether the
+league was half-PPR or full PPR; the v1 files carrying them are gone and
+`src/data/league_config.py` is now the only source. Until the pull lands,
+everything runs on `PROVISIONAL` settings and says so loudly.
 
 ---
 

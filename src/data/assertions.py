@@ -196,44 +196,6 @@ def validate_board(
     return _finish(report, raise_on_fatal, emit_warnings)
 
 
-def validate_players(players: Sequence[Any], *, raise_on_fatal: bool = True) -> BoardReport:
-    """Validate loaded Player objects -- catches bugs the DataFrame check cannot.
-
-    ``validate_board`` inspects the CSV; this inspects what the loader actually
-    produced. The 2025 bug lived in the gap between the two: the CSV was fine and
-    every constructed Player had vorp = 0.0.
-    """
-    report = BoardReport(n_players=len(players))
-
-    if not players:
-        report.fatal.append("no players loaded")
-        return _finish(report, raise_on_fatal, True)
-
-    vorps = np.array([float(getattr(p, "vorp", 0.0) or 0.0) for p in players])
-    std = float(vorps.std())
-    report.stats["vorp_std"] = std
-    report.stats["vorp_nonzero_frac"] = float((vorps != 0).mean())
-    report.stats["vorp_max"] = float(vorps.max())
-
-    if std <= 0.0:
-        report.fatal.append(
-            f"all {len(players)} loaded players have identical VORP "
-            f"({vorps[0]:.3f}). The board CSV column is probably cased "
-            f"differently than the key the loader reads (Series.get is "
-            f"case-sensitive)."
-        )
-
-    names = [getattr(p, "name", None) for p in players]
-    if len(set(names)) != len(names):
-        report.warnings.append(
-            f"{len(names) - len(set(names))} duplicate player names -- "
-            f"Player.__hash__ is hash(name), so duplicates collide in the "
-            f"available-players set"
-        )
-
-    return _finish(report, raise_on_fatal, True)
-
-
 def _finish(report: BoardReport, raise_on_fatal: bool, emit_warnings: bool) -> BoardReport:
     if emit_warnings:
         for msg in report.warnings:

@@ -354,8 +354,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # The connective tissue between draft day and the rest of the season. Without
     # this the roster only ever exists in the terminal scrollback, and week.py has
     # nothing to read.
-    if args.save_roster:
-        rows = sim.rosters[our_team]
+    rows = sim.rosters[our_team]
+    if args.save_roster and not rows:
+        # Quitting before the first pick must not clobber a real roster from an
+        # earlier session. An empty file is not a draft, it is a lost one.
+        print(f"\nno picks recorded -- leaving {args.save_roster} alone")
+    elif args.save_roster:
         out = Path(args.save_roster)
         tmp = out.with_suffix(out.suffix + ".tmp")
         tmp.write_text("\n".join(str(board.names[r]) for r in rows) + "\n")
