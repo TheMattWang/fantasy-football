@@ -1,11 +1,11 @@
 {
-  "built_utc": "2026-08-16T21:26:01+00:00",
+  "built_utc": "2026-08-17T02:39:06+00:00",
   "config_provisional": true,
   "ecr": {
     "cache": {
       "age_days": 0.0,
       "bytes": 38684016,
-      "fetched_utc": "2026-08-16T21:26:01+00:00",
+      "fetched_utc": "2026-08-17T02:39:05+00:00",
       "path": "/Users/mattwang/Documents/fantasy/fantasy-football/data/cache/db_fpecr.parquet"
     },
     "snapshot_date": "2026-08-14"

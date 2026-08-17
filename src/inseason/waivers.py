@@ -199,6 +199,7 @@ def best_lineup(
     week: int = 1,
     observed: Optional[pd.DataFrame] = None,
     prior_games: float = 4.0,
+    availability: Optional[pd.DataFrame] = None,
 ) -> Dict[str, List[str]]:
     """Optimal starters for one week, chosen ex ante from projections.
 
@@ -209,12 +210,19 @@ def best_lineup(
     actually happened rather than by the August projection. Without it this
     returns the same lineup in week 14 as in week 1 -- ``week`` was previously
     accepted and silently ignored, which looked like in-season logic and was not.
+
+    Pass ``availability`` (from :mod:`src.inseason.availability`) to stop it
+    starting players who are not playing. Rate and availability are kept
+    separate on purpose: "how good is he" and "is he on the field" are different
+    questions, and only the product decides the lineup.
     """
     rows = [samples.index[p] for p in roster if p in samples.index]
     if not rows:
         return {}
 
     ranking = blended_scores(samples, observed, prior_games=prior_games)
+    if availability is not None:
+        ranking = ranking * availability["multiplier"].to_numpy()
     scores = {int(row): float(ranking[row]) for row in rows}
     positions = {
         int(row): str(samples.players["position"].iloc[row]) for row in rows
@@ -262,15 +270,20 @@ def start_sit(
     week: int = 1,
     observed: Optional[pd.DataFrame] = None,
     prior_games: float = 4.0,
+    availability: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Per-player start/sit call, showing what moved it.
 
     ``proj_ppg`` is the August number; ``rate`` is that number updated by the
     season so far; ``delta`` is the difference. A large negative delta on a
     starter is the bust you would otherwise keep starting out of habit.
+
+    ``expected`` is ``rate`` scaled by the chance he actually plays, and it is
+    what the lineup is chosen on. ``status`` says why when the two differ.
     """
     lineup = best_lineup(roster, samples, config, week=week,
-                         observed=observed, prior_games=prior_games)
+                         observed=observed, prior_games=prior_games,
+                         availability=availability)
     starters = {
         name: slot
         for slot, names in lineup.items()
@@ -286,6 +299,11 @@ def start_sit(
             continue
         projected = float(samples.decision_score[row])
         rate = float(ranking[row])
+        factor = 1.0
+        status = ""
+        if availability is not None:
+            factor = float(availability["multiplier"].iloc[row])
+            status = str(availability["reason"].iloc[row])
         rows.append(
             {
                 "player": player,
@@ -293,9 +311,11 @@ def start_sit(
                 "proj_ppg": projected,
                 "rate": rate,
                 "delta": rate - projected,
+                "expected": rate * factor,
+                "status": status,
                 "slot": starters.get(player, "BN"),
                 "start": player in starters,
             }
         )
     frame = pd.DataFrame(rows)
-    return frame.sort_values(["start", "rate"], ascending=[False, False])
+    return frame.sort_values(["start", "expected"], ascending=[False, False])

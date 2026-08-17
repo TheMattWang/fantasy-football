@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.data.assertions import load_provenance, validate_freshness  # noqa: E402
 from src.data.league_config import load_or_provisional  # noqa: E402
+from src.inseason.availability import availability, injury_report  # noqa: E402
 from src.inseason.waivers import (  # noqa: E402
     best_lineup,
     observed_to_date,
@@ -119,26 +120,56 @@ def main(argv: Optional[List[str]] = None) -> int:
         observed = None
     else:
         print(f"reading results through week {through}...", flush=True)
-        observed = observed_to_date(args.season, through)
-        print(f"  {len(observed)} players with a stat line\n")
+        try:
+            observed = observed_to_date(args.season, through)
+            print(f"  {len(observed)} players with a stat line")
+        except Exception as exc:
+            # The season's weekly feed does not exist until games are played, so
+            # asking for week 6 of a season that has not started 404s. That is a
+            # normal state, not a crash: fall back to the preseason projection
+            # and say so, rather than showing the user a stack trace.
+            observed = None
+            print(f"  no results published for {args.season} yet "
+                  f"({type(exc).__name__}) -- using the preseason projection")
 
     missing = [p for p in roster if p not in samples.index]
     if missing:
         print(f"not on the board, skipped: {', '.join(missing)}\n")
 
+    # Who is actually playing. A bye or an "Out" designation is a guaranteed
+    # zero, and no amount of scoring rate makes up for not being on the field.
+    report = injury_report(args.season, args.week)
+    if len(report):
+        print(f"  injury report: {len(report)} designations this week")
+    avail = availability(samples, week=args.week, board=frame, report=report)
+
     table = start_sit(roster, samples, config, week=args.week,
-                      observed=observed, prior_games=args.prior_games)
+                      observed=observed, prior_games=args.prior_games,
+                      availability=avail)
 
     starters = table[table["start"]]
     bench = table[~table["start"]]
 
-    print(f"WEEK {args.week} LINEUP")
-    print(f"  {'':<26}{'pos':<5}{'slot':<7}{'proj':>7}{'rate':>7}{'delta':>8}")
+    print(f"\nWEEK {args.week} LINEUP")
+    print(f"  {'':<26}{'pos':<5}{'slot':<7}{'proj':>7}{'rate':>7}"
+          f"{'exp':>7}  status")
     for label, block in (("START", starters), ("BENCH", bench)):
-        print(f"  -- {label} " + "-" * 44)
+        print(f"  -- {label} " + "-" * 50)
         for _, row in block.iterrows():
             print(f"  {row['player']:<26}{row['position']:<5}{row['slot']:<7}"
-                  f"{row['proj_ppg']:>7.1f}{row['rate']:>7.1f}{row['delta']:>+8.1f}")
+                  f"{row['proj_ppg']:>7.1f}{row['rate']:>7.1f}"
+                  f"{row['expected']:>7.1f}  {row['status']}")
+
+    sidelined = table[table["status"] != ""]
+    if len(sidelined):
+        print("\n  NOT FULLY AVAILABLE:")
+        for _, row in sidelined.iterrows():
+            where = "STARTING" if row["start"] else "benched"
+            print(f"    {row['status']:<13}{row['player']:<26}"
+                  f"{row['rate']:>5.1f} -> {row['expected']:>4.1f} ppg   [{where}]")
+        if (sidelined["start"] & (sidelined["expected"] == 0)).any():
+            print("    ^ a zero-expected player is STARTING -- you have no one "
+                  "else eligible at that slot. Check waivers.")
 
     # The value of reacting is exactly the picks that differ from the frozen
     # lineup, so show those rather than making the reader diff two tables.

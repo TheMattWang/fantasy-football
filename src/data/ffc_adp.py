@@ -159,6 +159,11 @@ def attach_market_dispersion(
 
     frame["ffc_adp"] = keys.map(lookup["adp"]).astype(float)
     frame["adp_sd"] = keys.map(lookup["stdev"]).astype(float)
+    # Bye week rides along because it is the one availability fact that is known
+    # in August and never changes. Starting a player on bye is a guaranteed zero,
+    # and it is the cheapest mistake in fantasy to avoid.
+    if "bye" in lookup.columns:
+        frame["bye"] = keys.map(lookup["bye"])
 
     matched = int(frame["adp_sd"].notna().sum())
     drafted = teams * 15
