@@ -133,7 +133,11 @@ def rank_waiver_adds(
 
 
 def observed_to_date(
-    season: int, through_week: int, *, scoring: Optional[Dict[str, float]] = None
+    season: int,
+    through_week: int,
+    *,
+    scoring: Optional[Dict[str, float]] = None,
+    refresh: bool = False,
 ) -> pd.DataFrame:
     """Points scored and games played so far this season, per player.
 
@@ -144,7 +148,7 @@ def observed_to_date(
     from ..data import nflverse
     from ..projections.ecr import normalize_name
 
-    weekly = nflverse.weekly_fantasy([season], scoring)
+    weekly = nflverse.weekly_fantasy([season], scoring, refresh=refresh)
     weekly = weekly[weekly["week"] <= through_week]
     name_col = ("player_display_name" if "player_display_name" in weekly.columns
                 else "player_name")

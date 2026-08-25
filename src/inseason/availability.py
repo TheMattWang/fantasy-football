@@ -60,7 +60,7 @@ BYE_MULTIPLIER = 0.0
 UNSTARTABLE_BELOW = 0.05
 
 
-def injury_report(season: int, week: int) -> pd.DataFrame:
+def injury_report(season: int, week: int, *, refresh: bool = False) -> pd.DataFrame:
     """This week's injury designations, one row per player.
 
     Returns ``name_key`` and ``report_status``. Empty frame rather than an
@@ -70,7 +70,7 @@ def injury_report(season: int, week: int) -> pd.DataFrame:
     from ..data import nflverse
 
     try:
-        frame = nflverse.load("injuries", [season])
+        frame = nflverse.load("injuries", [season], refresh=refresh)
     except Exception:
         return pd.DataFrame(columns=["name_key", "report_status"])
 

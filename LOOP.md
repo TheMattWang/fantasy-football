@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R1 DONE -> next R0
+- **Round:** R0 DONE -> next R2
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -20,13 +20,13 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 |----|-------|--------|
 | T1 | board fresh; `draft_day.py` starts without `--allow-stale`; 15-round offline dry run | **PASS** (dry run pending) |
 | T2 | `week.py` runs weeks 1-14, no traceback, no silently-wrong output | OPEN |
-| T3 | suite green; every defect fixed this run has a regression test | **PASS** (266/266) |
+| T3 | suite green; every defect fixed this run has a regression test | **PASS** (273/273) |
 | T4 | defect ledger has zero open entries | OPEN |
 | T5 | two consecutive rounds add nothing new | 0 of 2 |
 
 ## Round queue
 
-- [ ] R0  ETag-conditional refresh for nflverse  (headline bug)
+- [x] R0  ETag-conditional refresh for nflverse  (headline bug)
 - [x] R1  Refresh board; suite green            (deadline-bound)
 - [ ] R2  Byes from schedule + team normalizer
 - [ ] R3  Sweep week.py across weeks 1-14
@@ -41,7 +41,8 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 
 | id | defect | severity | status |
 |----|--------|----------|--------|
-| D1 | `nflverse.load` never refreshes; nothing passes `refresh=`. In-season data freezes. | CRITICAL | OPEN (R0) |
+| D1 | `nflverse.load` never refreshes; nothing passes `refresh=`. In-season data freezes. | CRITICAL | **FIXED** (R0) |
+| D11 | `network` pytest marker unregistered; suite reached the live feed despite docstring claiming otherwise | LOW | **FIXED** (R0) |
 | D2 | Board 11 days stale; `draft_day.py` refuses to start | CRITICAL | **FIXED** (R1) |
 | D10 | Draft gate demanded ECR <=3d from a feed that publishes every 7d -- unsatisfiable 4 days in 7 | CRITICAL | **FIXED** (R1) |
 | D3 | `bye` covers 188/505 board rows; roster player outside FFC top-190 gets no bye check | HIGH | OPEN (R2) |
@@ -98,5 +99,42 @@ Verified: `pytest tests/ -q` **266 passed** (was 259/260); `draft_day.py --slot 
 with **no** `--allow-stale`. Six new tests pin the distinction, including that a board
 with no cadence recorded keeps the strict bound (absent evidence is not evidence of
 freshness) and that a dead-but-latest feed is still fatal.
+
+**Verdict: KEPT.**
+
+### R0 — the in-season cache was write-once (2026-08-25)
+
+`nflverse.load` re-downloaded only when `refresh=True`, and **nothing anywhere passed
+it** -- `weekly_fantasy` did not even expose the parameter. The first in-season load
+pinned that season's data for the rest of the year.
+
+The failure mode is worse than "data goes stale", and the research agent found the part I
+had wrong: both callers filter the cached frame **by week**. A file cached in week 1 does
+not merely age by week 5, it filters to **empty** -- which `injury_report`'s
+graceful-degradation path reads as "no information", scoring every ruled-out player as
+fully healthy for the rest of the season. A stale-but-parseable file is indistinguishable
+from a genuinely thin one, so the availability work would have been defeated from
+underneath with no error anywhere.
+
+Fixed with a conditional GET rather than a TTL: nflverse serves `ETag`, so `If-None-Match`
+returns **304 with no body** when nothing changed. No wasted downloads, and -- unlike a
+TTL -- no stale window in which we serve last week's data because an interval has not
+elapsed. Finished seasons are never rechecked (their files cannot change); only the live
+season and season-independent assets are.
+
+Measured against the live feed: cold 0.95s, warm **0.23s** (304), forced re-fetch 0.87s.
+While testing, `last_modified` moved from 13:07 to 17:47 the same day -- the feed really
+does republish intraday, so a TTL of any length would have been wrong some of the time.
+
+Also registered the `network` pytest marker. `test_nflverse.py` has claimed since it was
+written that network tests "are skipped by default"; with no pytest config they were not.
+That matters now the loop runs unattended -- a suite that reaches the network turns
+somebody else's outage into a red build here.
+
+Verified: **273 passed, 1 deselected**; `-m network` runs the live check separately;
+`week.py --week 5 --season 2025` reads 1498 stat lines and 137 designations and benches
+Lamar Jackson (22.6 ppg, the roster's best rate) as OUT. `draft_day.py` proven to run with
+`socket.connect` disabled -- now a permanent test, because the new remote check is right
+for the weekly feed and would be fatal on a 90-second pick clock.
 
 **Verdict: KEPT.**

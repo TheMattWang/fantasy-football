@@ -26,13 +26,37 @@ Why this replaces clean.py's ingestion
 
 from __future__ import annotations
 
+import datetime as _dt
+import json
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
+import requests
 
 from .paths import ensure, nflverse_dir
 
 BASE = "https://github.com/nflverse/nflverse-data/releases/download"
+
+_USER_AGENT = "fantasy-draft-agent/2.0 (personal league tooling)"
+
+
+def _is_live(season: Optional[int]) -> bool:
+    """Is this season still being played, and therefore still being updated?
+
+    A finished season's parquet never changes, so checking it is a wasted round
+    trip on every load. The current one changes every week, which is precisely
+    where the write-once cache used to go wrong.
+
+    The NFL year rolls over in March: nflverse publishes the next season's
+    assets long before September, and the prior season stops changing well
+    before that. Anything at or past the current NFL year is treated as live.
+    """
+    if season is None:
+        return True          # season-independent assets (players, schedules)
+    today = _dt.date.today()
+    nfl_year = today.year if today.month >= 3 else today.year - 1
+    return int(season) >= nfl_year
 
 # friendly name -> (release, asset stem). "{season}" is substituted per season;
 # assets without it are season-independent.
@@ -106,18 +130,91 @@ def _asset_url(dataset: str, season: Optional[int]) -> str:
     return f"{BASE}/{release}/{stem}.parquet"
 
 
+# Where a cached asset's HTTP validators live, so freshness can be checked
+# without downloading the body. One JSON file per parquet, same stem.
+def _stamp_path(path: "Path") -> "Path":
+    return path.with_suffix(path.suffix + ".etag.json")
+
+
+def _is_current(url: str, path: "Path", timeout: float) -> bool:
+    """Has the remote asset changed since we cached it?
+
+    A conditional GET, which is the honest answer and a free one: nflverse
+    serves `ETag` and `Last-Modified`, so `If-None-Match` returns **304 Not
+    Modified** and no body when the file is unchanged. That beats a TTL in both
+    directions -- no needless re-downloads, and no stale window during which we
+    would serve last week's data because an interval had not elapsed yet.
+
+    Errs toward "current" on any network failure. Being offline must not blow
+    away a usable cache; the caller can force the issue with `refresh=True`.
+    """
+    stamp = _stamp_path(path)
+    if not stamp.exists():
+        return False
+    try:
+        known = json.loads(stamp.read_text())
+    except (OSError, ValueError):
+        return False
+
+    headers = {"User-Agent": _USER_AGENT}
+    if known.get("etag"):
+        headers["If-None-Match"] = known["etag"]
+    elif known.get("last_modified"):
+        headers["If-Modified-Since"] = known["last_modified"]
+    else:
+        return False
+
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout, stream=True)
+        response.close()
+    except requests.RequestException:
+        return True
+    return response.status_code == 304
+
+
+def _record_stamp(url: str, path: "Path", timeout: float) -> None:
+    """Save the validators for the copy we just cached."""
+    try:
+        response = requests.head(url, headers={"User-Agent": _USER_AGENT},
+                                 timeout=timeout, allow_redirects=True)
+        payload = {"etag": response.headers.get("ETag"),
+                   "last_modified": response.headers.get("Last-Modified"),
+                   "checked_utc": _dt.datetime.now(tz=_dt.timezone.utc)
+                                      .isoformat(timespec="seconds")}
+        _stamp_path(path).write_text(json.dumps(payload, indent=1, sort_keys=True))
+    except (requests.RequestException, OSError):
+        # No stamp means the next load re-downloads. Wasteful, never wrong.
+        pass
+
+
 def load(
     dataset: str,
     seasons: Optional[Iterable[int]] = None,
     *,
     refresh: bool = False,
+    check_remote: Optional[bool] = None,
+    timeout: float = 20.0,
 ) -> pd.DataFrame:
     """Load an nflverse dataset, caching each season's parquet locally.
 
     Args:
         dataset: key of :data:`DATASETS`.
         seasons: seasons to fetch; omit for season-independent assets.
-        refresh: re-download even if cached.
+        refresh: re-download unconditionally, without asking the server.
+        check_remote: ask the server whether the cache is current. Defaults to
+            True for the *current* season and False for finished ones, because
+            a completed season's file never changes and every check would be a
+            pointless round trip.
+
+    Why `check_remote` exists at all: this cache used to be write-once. The
+    `refresh` flag was plumbed nowhere -- no caller anywhere passed it -- so the
+    first in-season load of a season pinned that season's data forever. The
+    failure was silent and it compounded, because `injury_report` and
+    `observed_to_date` both filter the cached frame by week: a file cached in
+    week 1 does not merely go stale by week 5, it filters to **empty**, which
+    the callers read as "no injuries reported" and score every ruled-out player
+    as fully healthy. Exactly the bug the board's `--refresh` fix already cured
+    once, still live on the path where the data changes weekly.
     """
     cache = ensure(nflverse_dir())
     season_list: List[Optional[int]] = list(seasons) if seasons is not None else [None]
@@ -128,9 +225,13 @@ def load(
         name = url.rsplit("/", 1)[-1]
         path = cache / name
 
-        if refresh or not path.exists():
+        ask = check_remote if check_remote is not None else _is_live(season)
+        stale = refresh or not path.exists() or (ask and not _is_current(url, path, timeout))
+
+        if stale:
             frame = pd.read_parquet(url)
             frame.to_parquet(path, index=False)
+            _record_stamp(url, path, timeout)
         else:
             frame = pd.read_parquet(path)
 
@@ -241,9 +342,10 @@ def weekly_fantasy(
     scoring: Optional[Dict[str, float]] = None,
     *,
     regular_season_only: bool = True,
+    refresh: bool = False,
 ) -> pd.DataFrame:
     """Per player-week fantasy points, joined to identity columns."""
-    weekly = load("weekly", seasons)
+    weekly = load("weekly", seasons, refresh=refresh)
 
     if regular_season_only and "season_type" in weekly.columns:
         weekly = weekly[weekly["season_type"] == "REG"]
