@@ -68,7 +68,66 @@ DATASETS: Dict[str, tuple] = {
     "injuries":      ("injuries",        "injuries_{season}"),
     "depth_charts":  ("depth_charts",    "depth_charts_{season}"),
     "players":       ("players",         "players"),
+    # One all-seasons file, republished daily, and it carries the UPCOMING
+    # season before a game is played -- which is what makes it a bye-week
+    # source in August. See `bye_weeks`.
+    "schedules":     ("schedules",       "games"),
 }
+
+# nflverse and the fantasy sites disagree about two clubs, and a silent join on
+# the raw code drops both. Measured on the 2026 board: 30 of 32 teams matched,
+# and the two that did not were Jacksonville and the Rams -- not a data gap, a
+# spelling one.
+TEAM_ALIASES: Dict[str, str] = {
+    "JAX": "JAC",
+    "LA": "LAR",
+    "STL": "LAR", "SD": "LAC", "OAK": "LV",   # relocations, for historical seasons
+    "WSH": "WAS", "ARZ": "ARI", "BLT": "BAL", "CLV": "CLE", "HST": "HOU",
+}
+
+
+def normalize_team(code: object) -> str:
+    """Canonical team abbreviation, so joins across sources cannot silently drop.
+
+    The player-name equivalent, :func:`src.projections.ecr.normalize_name`, exists
+    for the same reason and makes the same argument: every mismatch drops a real
+    player off the board. A team mismatch is worse, because it drops the whole
+    roster at once -- and quietly, since the join still succeeds for everyone else.
+    """
+    text = str(code or "").strip().upper()
+    return TEAM_ALIASES.get(text, text)
+
+
+def bye_weeks(season: int, *, refresh: bool = False) -> Dict[str, int]:
+    """Each team's bye week, derived from the schedule it does not appear in.
+
+    Deliberately derived rather than read: no feed publishes "bye week" as a
+    field, but a team's bye is exactly the regular-season week in which it plays
+    no game, and that is a fact about the schedule.
+
+    Preferred over the fantasy-market bye that used to be the only source, which
+    covered 188 of 505 board rows. This covers every team, so it covers every
+    rostered player who has one. The two agreed exactly where both had an
+    opinion -- 30 of 30 comparable teams on the 2026 board.
+    """
+    games = load("schedules", refresh=refresh)
+    games = games[(games["season"] == int(season)) & (games["game_type"] == "REG")]
+    if games.empty:
+        return {}
+
+    weeks = set(range(int(games["week"].min()), int(games["week"].max()) + 1))
+    home = games["home_team"].map(normalize_team)
+    away = games["away_team"].map(normalize_team)
+
+    byes: Dict[str, int] = {}
+    for team in sorted(set(home) | set(away)):
+        played = set(games.loc[(home == team) | (away == team), "week"].astype(int))
+        missing = sorted(weeks - played)
+        # Exactly one, or we do not understand the schedule and should say so by
+        # omission rather than guess which week is the real bye.
+        if len(missing) == 1:
+            byes[team] = missing[0]
+    return byes
 
 # Roster statuses that mean "on the active roster and able to play this week".
 ACTIVE_STATUSES = frozenset({"ACT"})

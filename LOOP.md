@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R0 DONE -> next R2
+- **Round:** R2 DONE -> next R3
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -20,7 +20,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 |----|-------|--------|
 | T1 | board fresh; `draft_day.py` starts without `--allow-stale`; 15-round offline dry run | **PASS** (dry run pending) |
 | T2 | `week.py` runs weeks 1-14, no traceback, no silently-wrong output | OPEN |
-| T3 | suite green; every defect fixed this run has a regression test | **PASS** (273/273) |
+| T3 | suite green; every defect fixed this run has a regression test | **PASS** (277/277) |
 | T4 | defect ledger has zero open entries | OPEN |
 | T5 | two consecutive rounds add nothing new | 0 of 2 |
 
@@ -28,7 +28,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 
 - [x] R0  ETag-conditional refresh for nflverse  (headline bug)
 - [x] R1  Refresh board; suite green            (deadline-bound)
-- [ ] R2  Byes from schedule + team normalizer
+- [x] R2  Byes from schedule + team normalizer
 - [ ] R3  Sweep week.py across weeks 1-14
 - [ ] R4  Install loop machinery (hooks, autocompact, weekly LaunchAgent)
 - [ ] R5  Refine availability table (report_status x practice_status)
@@ -45,8 +45,9 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 | D11 | `network` pytest marker unregistered; suite reached the live feed despite docstring claiming otherwise | LOW | **FIXED** (R0) |
 | D2 | Board 11 days stale; `draft_day.py` refuses to start | CRITICAL | **FIXED** (R1) |
 | D10 | Draft gate demanded ECR <=3d from a feed that publishes every 7d -- unsatisfiable 4 days in 7 | CRITICAL | **FIXED** (R1) |
-| D3 | `bye` covers 188/505 board rows; roster player outside FFC top-190 gets no bye check | HIGH | OPEN (R2) |
-| D4 | No team-abbreviation normalizer: `JAX`/`JAC`, `LA`/`LAR` silently drop 2 teams | HIGH | OPEN (R2) |
+| D3 | `bye` covers 188/505 board rows; roster player outside FFC top-190 gets no bye check | HIGH | **FIXED** (R2) |
+| D4 | No team-abbreviation normalizer: `JAX`/`JAC`, `LA`/`LAR` silently drop 2 teams | HIGH | **FIXED** (R2) |
+| D12 | FFC carries a stale team for Kayshon Boutte (HOU; nflverse+board say NE) | LOW | **WONTFIX** -- upstream feed error, now detected and warned; schedule value wins |
 | D5 | `STATUS_MULTIPLIER` averages over 3 distinct practice states; 289 no-designation DNP weeks scored healthy | MEDIUM | OPEN (R5) |
 | D6 | `rank_waiver_adds` unreachable from any CLI | MEDIUM | OPEN (R7) |
 | D7 | Protocol enforced only on `replay_season`; worker scripts bypass `check()` | MEDIUM | OPEN (R8) |
@@ -136,5 +137,38 @@ Verified: **273 passed, 1 deselected**; `-m network` runs the live check separat
 Lamar Jackson (22.6 ppg, the roster's best rate) as OUT. `draft_day.py` proven to run with
 `socket.connect` disabled -- now a permanent test, because the new remote check is right
 for the weekly feed and would be fatal on a 90-second pick clock.
+
+**Verdict: KEPT.**
+
+### R2 — bye weeks from the schedule, and the join that was silently dropping two clubs (2026-08-25)
+
+`bye` arrived only with the FFC market attachment, which lists ~190 players, so it covered
+**188 of 505** board rows. A rostered player outside that range got **no bye check at
+all** -- and a bye is a guaranteed zero, the cheapest mistake in fantasy to avoid.
+
+nflverse publishes a `schedules` release (`games.parquet`, one all-seasons file,
+republished daily) that already carried all 272 of the 2026 regular-season games in
+August. A team's bye is derivable from it exactly: the regular-season week it plays no
+game. No feed publishes "bye week" as a field, but this is a fact about the schedule
+rather than an opinion of the market.
+
+**The trap.** nflverse spells two clubs differently from the fantasy sites -- `JAX` vs
+`JAC`, `LA` vs `LAR` -- and there was **no team normalizer anywhere in `src/`**. A naive
+join drops Jacksonville and the Rams entirely: every player on them, with no error. Added
+`normalize_team` mirroring `normalize_name`, which exists for the same reason and makes
+the same argument.
+
+**The cross-check earned its keep on the first run**, and not the way I expected: 1
+disagreement in 194 rows, and it was a *team* conflict rather than a bye one. Both feeds
+agree NE's bye is 11 and HOU's is 8 -- they disagree about which club Kayshon Boutte plays
+for. Adjudicated against nflverse weekly rosters: **NE, week 1, ACT**, so the board is
+right and FFC is stale. That is now the recorded reason the schedule value wins over the
+market one, rather than an arbitrary preference.
+
+Coverage **188/505 -> 498/518 (96%)**, and the only 20 rows without a bye are free agents,
+who have no team and therefore cannot have one. A test asserts precisely that: no player
+on a real team may lack a bye.
+
+Verified: `pytest tests/ -q` **277 passed, 1 deselected**.
 
 **Verdict: KEPT.**

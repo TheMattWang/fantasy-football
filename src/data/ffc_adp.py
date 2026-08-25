@@ -159,11 +159,14 @@ def attach_market_dispersion(
 
     frame["ffc_adp"] = keys.map(lookup["adp"]).astype(float)
     frame["adp_sd"] = keys.map(lookup["stdev"]).astype(float)
-    # Bye week rides along because it is the one availability fact that is known
-    # in August and never changes. Starting a player on bye is a guaranteed zero,
-    # and it is the cheapest mistake in fantasy to avoid.
+    # Bye week is the one availability fact known in August that never changes,
+    # and starting a player on bye is a guaranteed zero -- the cheapest mistake
+    # in fantasy to avoid. FFC only lists ~190 players, though, so this covered
+    # 188 of 505 board rows and a rostered player outside that range got no bye
+    # check at all. The schedule covers every team, so it covers everyone.
     if "bye" in lookup.columns:
         frame["bye"] = keys.map(lookup["bye"])
+    frame = _attach_schedule_byes(frame, season, refresh=refresh)
 
     matched = int(frame["adp_sd"].notna().sum())
     drafted = teams * 15
@@ -186,6 +189,61 @@ def attach_market_dispersion(
         f"of the {drafted} that get drafted"
         + ("" if fitted is None else f"; {int(frame['adp_sd'].isna().sum())} left unfilled")
     )
+    return frame
+
+
+def _attach_schedule_byes(frame: pd.DataFrame, season: int, *, refresh: bool
+                          ) -> pd.DataFrame:
+    """Fill `bye` from the NFL schedule, and cross-check the market against it.
+
+    A team's bye is the regular-season week it plays no game -- a fact about the
+    schedule, not an opinion of the fantasy market, and available for every team
+    rather than only the ones FFC lists.
+
+    The market value is kept as a check rather than discarded. When the two were
+    first compared on the 2026 board they agreed on **30 of 30** teams where both
+    had an opinion, so they are genuinely measuring the same thing and a future
+    disagreement means one of the feeds is wrong. Saying so is worth more than
+    silently preferring either.
+    """
+    from .nflverse import bye_weeks, normalize_team
+
+    try:
+        byes = bye_weeks(season, refresh=refresh)
+    except Exception as exc:                      # never break a board build
+        warnings.warn(f"could not derive bye weeks from the schedule: {exc}",
+                      stacklevel=2)
+        return frame
+    if not byes or "team" not in frame.columns:
+        return frame
+
+    from_schedule = frame["team"].map(normalize_team).map(byes)
+
+    if "bye" in frame.columns:
+        market = pd.to_numeric(frame["bye"], errors="coerce")
+        both = market.notna() & from_schedule.notna()
+        disagree = int((market[both] != from_schedule[both]).sum())
+        if disagree:
+            # Almost always a TEAM disagreement rather than a bye one: both
+            # feeds know when each club is off, so a mismatch means they have
+            # the player on different clubs. Adjudicated once against nflverse
+            # weekly rosters (Kayshon Boutte, 2026: board NE, FFC HOU, roster
+            # NE/ACT) -- the board was right and FFC was stale, which is why
+            # the schedule value wins below rather than the market one.
+            warnings.warn(
+                f"bye week: schedule and market disagree on {disagree} of "
+                f"{int(both.sum())} rows. These are usually stale TEAM "
+                f"assignments in the market feed, not bye errors; the schedule "
+                f"value wins. Check with nflverse rosters if it matters.",
+                stacklevel=2,
+            )
+        frame["bye"] = from_schedule.fillna(market)
+    else:
+        frame["bye"] = from_schedule
+
+    covered = int(frame["bye"].notna().sum())
+    print(f"  bye weeks: {covered}/{len(frame)} rows from the NFL schedule "
+          f"({len(byes)} teams)")
     return frame
 
 

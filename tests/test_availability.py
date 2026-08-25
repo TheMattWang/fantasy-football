@@ -200,3 +200,58 @@ def test_start_sit_reports_expected_and_status(league):
     assert row["expected"] == 0.0
     assert row["status"] == "OUT"
     assert row["rate"] > 0, "the rate is unchanged -- only availability scales it"
+
+
+# --- bye weeks come from the schedule, not the fantasy market -------------
+#
+# `bye` used to arrive only with the FFC market attachment, which lists ~190
+# players, so it covered 188 of 505 board rows. A rostered player outside that
+# range got NO bye check at all -- and a bye is a guaranteed zero, the cheapest
+# mistake in fantasy to avoid. The NFL schedule covers every team, so it covers
+# every rostered player who has one.
+
+def test_every_team_has_exactly_one_bye():
+    from src.data.nflverse import bye_weeks
+
+    byes = bye_weeks(2026)
+    assert len(byes) == 32, f"expected 32 teams, got {len(byes)}"
+    assert all(1 <= w <= 18 for w in byes.values())
+
+
+def test_the_two_teams_the_sources_spell_differently_are_present():
+    """`JAX`/`JAC` and `LA`/`LAR`. Without normalization a join on the raw code
+    silently drops both clubs -- every player on them, with no error."""
+    from src.data.nflverse import bye_weeks, normalize_team
+
+    assert normalize_team("JAX") == "JAC"
+    assert normalize_team("LA") == "LAR"
+    assert normalize_team("KC") == "KC"
+    byes = bye_weeks(2026)
+    assert "JAC" in byes and "LAR" in byes
+
+
+def test_normalize_team_is_total_on_junk():
+    from src.data.nflverse import normalize_team
+
+    assert normalize_team(None) == ""
+    assert normalize_team(" jax ") == "JAC"
+
+
+def test_the_board_covers_byes_for_essentially_everyone(league):
+    """The measured win: 188/505 -> ~96%. The remainder are free agents, who
+    have no team and therefore no bye."""
+    board, _, _, _ = league
+    if "bye" not in board.columns:
+        pytest.skip("board carries no bye column")
+    have = int(board["bye"].notna().sum())
+    assert have / len(board) > 0.90, f"only {have}/{len(board)} rows carry a bye"
+
+    missing = board[board["bye"].isna()]
+    if len(missing):
+        from src.data.nflverse import bye_weeks, normalize_team
+        known = set(bye_weeks(2026))
+        leaked = missing[missing["team"].map(normalize_team).isin(known)]
+        assert leaked.empty, (
+            f"{len(leaked)} players are on a real team but have no bye: "
+            f"{leaked['player_name'].head(5).tolist()}"
+        )
