@@ -56,6 +56,28 @@ from src.inseason.waivers import (  # noqa: E402
 from src.simulation.distributions import build_samples  # noqa: E402
 
 
+def season_week_range(season: int) -> tuple:
+    """First and last week the NFL actually plays in this season.
+
+    Read from the schedule rather than hardcoded, because it has changed: the
+    regular season went from 16 games to 17 in 2021 and the week count follows
+    the data, not a constant we would forget to update.
+
+    Falls back to 1-18 when the schedule is unreachable, which is wide enough to
+    catch a typo without refusing a legitimate week while offline.
+    """
+    try:
+        from src.data.nflverse import load
+
+        games = load("schedules")
+        games = games[(games["season"] == int(season)) & (games["game_type"] == "REG")]
+        if not games.empty:
+            return int(games["week"].min()), int(games["week"].max())
+    except Exception:
+        pass
+    return 1, 18
+
+
 def read_roster(path: Path) -> List[str]:
     names = [line.strip() for line in path.read_text().splitlines()]
     return [n for n in names if n and not n.startswith("#")]
@@ -85,6 +107,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # An out-of-range week used to be accepted silently. `--week 0` became week
+    # 1, and `--week 99` read "results through week 98", aggregated the whole
+    # season and printed a confident lineup for a week that does not exist --
+    # a typo producing plausible output instead of an error, which is the
+    # failure mode this project keeps having to fix.
+    first, last = season_week_range(args.season)
+    if not first <= args.week <= last:
+        print(f"week {args.week} is not a week of the {args.season} season "
+              f"({first}-{last}).", file=sys.stderr)
+        return 1
 
     roster_path = Path(args.roster)
     if not roster_path.exists():

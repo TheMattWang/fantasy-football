@@ -141,3 +141,38 @@ def test_players_missing_from_the_board_are_named_not_dropped_silently(tmp_path,
                "--board", "data/processed/board_2026.csv", "--samples", "20"])
 
     assert "Not A Real Person" in capsys.readouterr().out
+
+
+# --- an impossible week must be refused, not answered ---------------------
+#
+# `--week 0` silently became week 1, and `--week 99` read "results through week
+# 98", aggregated the entire season and printed a confident lineup for a week
+# that does not exist. A typo produced plausible output instead of an error --
+# the same quiet-degradation failure as the board's --refresh no-op and the
+# write-once cache.
+
+import pytest
+
+
+@pytest.mark.parametrize("week", [0, -1, 19, 99])
+def test_a_week_outside_the_season_is_refused(week, capsys):
+    from week import main
+
+    assert main(["--week", str(week), "--season", "2026"]) == 1
+    assert "is not a week" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("week", [1, 14, 18])
+def test_every_real_week_is_accepted(week):
+    from week import main
+
+    assert main(["--week", str(week), "--season", "2026"]) == 0
+
+
+def test_the_week_range_comes_from_the_schedule_not_a_constant():
+    """The regular season went 16 games -> 17 in 2021. Reading the bound from
+    the data means it tracks changes we would otherwise forget."""
+    from week import season_week_range
+
+    assert season_week_range(2026) == (1, 18)
+    assert season_week_range(2019) == (1, 17), "pre-2021 seasons were shorter"

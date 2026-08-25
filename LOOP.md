@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R2 DONE -> next R3
+- **Round:** R3 DONE -> next R4
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -19,8 +19,8 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 | id | check | status |
 |----|-------|--------|
 | T1 | board fresh; `draft_day.py` starts without `--allow-stale`; 15-round offline dry run | **PASS** (dry run pending) |
-| T2 | `week.py` runs weeks 1-14, no traceback, no silently-wrong output | OPEN |
-| T3 | suite green; every defect fixed this run has a regression test | **PASS** (277/277) |
+| T2 | `week.py` runs weeks 1-14, no traceback, no silently-wrong output | **PASS** |
+| T3 | suite green; every defect fixed this run has a regression test | **PASS** (285/285) |
 | T4 | defect ledger has zero open entries | OPEN |
 | T5 | two consecutive rounds add nothing new | 0 of 2 |
 
@@ -29,7 +29,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 - [x] R0  ETag-conditional refresh for nflverse  (headline bug)
 - [x] R1  Refresh board; suite green            (deadline-bound)
 - [x] R2  Byes from schedule + team normalizer
-- [ ] R3  Sweep week.py across weeks 1-14
+- [x] R3  Sweep week.py across weeks 1-14
 - [ ] R4  Install loop machinery (hooks, autocompact, weekly LaunchAgent)
 - [ ] R5  Refine availability table (report_status x practice_status)
 - [ ] R6  Price P(INA | Questionable) from nflverse; then judge Sleeper
@@ -53,6 +53,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 | D7 | Protocol enforced only on `replay_season`; worker scripts bypass `check()` | MEDIUM | OPEN (R8) |
 | D8 | `docs/findings/` has 4 files for 12 experiments; §13 claims one each | LOW | OPEN |
 | D9 | Untracked cruft not gitignored; `deployment/` is 8 empty dirs | LOW | OPEN |
+| D13 | `week.py --week` unvalidated: 0 became week 1, 99 aggregated the whole season and printed a lineup | MEDIUM | **FIXED** (R3) |
 
 ## Decisions recorded (so they are not silently revisited)
 
@@ -172,3 +173,31 @@ on a real team may lack a bye.
 Verified: `pytest tests/ -q` **277 passed, 1 deselected**.
 
 **Verdict: KEPT.**
+
+### R3 — sweeping week.py, and a week that does not exist (2026-08-25)
+
+Ran `week.py` over every week 1-14 for 2026 and a spread of weeks for 2025. No
+tracebacks, no zero-expected player ever starting, and the bye detection lands exactly
+where the schedule says it should: roster byes `{6:3, 7:1, 8:1, 11:3, 13:4, 14:2}`, which
+matches the sidelined counts week for week. All 14 roster players' board bye agrees with
+the schedule. Puka Nacua is on **LAR** and Jeanty/Bowers on **LV**, so R2's normalizer is
+load-bearing on this actual roster rather than hypothetically.
+
+Confirmed the reactive estimate genuinely tracks the season rather than sitting frozen:
+12 of 14 players move more than 1 ppg between weeks 2 and 14 on 2025 actuals -- Jonathan
+Taylor 14.2 -> 23.3, Lamar Jackson 23.6 -> 18.0, McCaffrey 17.0 -> 21.2.
+
+**D13, found at the boundaries.** `--week` was unvalidated. `--week 0` silently became
+week 1; `--week 99` read "results through week 98", aggregated all 2012 player-weeks of
+the season and printed a confident lineup for a week that does not exist. A typo produced
+plausible output instead of an error -- the same failure class as the board's `--refresh`
+no-op and the write-once cache.
+
+Bounded by the schedule rather than a constant, because the bound has changed: the regular
+season went from 17 weeks to 18 in 2021, and a test pins that `season_week_range(2019)`
+is `(1, 17)` while 2026 is `(1, 18)`. Falls back to 1-18 when offline -- wide enough to
+catch a typo without refusing a legitimate week.
+
+Verified: **285 passed, 1 deselected**.
+
+**Verdict: KEPT.** T2 now green.
