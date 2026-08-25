@@ -160,6 +160,42 @@ def build_board(
     return board
 
 
+def _source_cadence(board_dates) -> Dict[str, object]:
+    """How often the consensus feed publishes, and whether we have its newest.
+
+    "Stale" and "as fresh as obtainable" are different failures and only one of
+    them is our fault. FantasyPros publishes a WEEKLY snapshot -- measured over
+    361 snapshots, the median gap is 7 days and so is the p90 -- so an absolute
+    "must be under 3 days old" bound is unsatisfiable four days out of every
+    seven, no matter how diligently we refresh.
+
+    What the draft-day gate actually wants to know is whether a newer snapshot
+    existed that we failed to pull. Recording it here keeps `draft_day.py`
+    offline: the comparison happens at build time, when the network is allowed.
+    """
+    out: Dict[str, object] = {
+        "cadence_days": None, "latest_available": None, "is_latest_available": None,
+    }
+    try:
+        from .ecr import load_ecr_history
+        history = pd.to_datetime(load_ecr_history()["scrape_date"], errors="coerce")
+        stamps = pd.Series(sorted(history.dropna().unique()))
+        if len(stamps) < 3:
+            return out
+        gaps = stamps.diff().dt.days.dropna()
+        # Median, not mean: the offseason leaves ~344-day holes that would drag
+        # any average far past the in-season cadence the gate cares about.
+        out["cadence_days"] = float(gaps.median())
+        newest = stamps.max()
+        out["latest_available"] = str(newest.date())
+        if board_dates is not None and board_dates.notna().any():
+            out["is_latest_available"] = bool(board_dates.max().date() == newest.date())
+    except Exception:
+        # Provenance is a description of the build; it must never break one.
+        pass
+    return out
+
+
 def collect_provenance(
     board: pd.DataFrame,
     season: int,
@@ -215,14 +251,18 @@ def collect_provenance(
         "skill_rows": int((~board["is_streamed"]).sum()) if "is_streamed" in board else None,
         "train_seasons": [int(s) for s in train],
         "config_provisional": bool(is_provisional(config)),
-        "ecr": {
-            "cache": file_age(cache_dir() / ECR_CACHE),
-            # The consensus snapshot's own date -- the number that actually says
-            # how current the rankings are, independent of when we downloaded.
-            "snapshot_date": (str(ecr_dates.max().date())
-                              if ecr_dates is not None and ecr_dates.notna().any()
-                              else None),
-        },
+        "ecr": dict(
+            {
+                "cache": file_age(cache_dir() / ECR_CACHE),
+                # The consensus snapshot's own date -- the number that actually
+                # says how current the rankings are, independent of when we
+                # downloaded.
+                "snapshot_date": (str(ecr_dates.max().date())
+                                  if ecr_dates is not None and ecr_dates.notna().any()
+                                  else None),
+            },
+            **_source_cadence(ecr_dates),
+        ),
         "market_adp": {
             "attached": bool(has_market),
             "matched": matched,

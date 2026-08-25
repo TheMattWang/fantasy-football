@@ -1,27 +1,30 @@
 {
-  "built_utc": "2026-08-17T02:39:06+00:00",
+  "built_utc": "2026-08-25T17:47:22+00:00",
   "config_provisional": true,
   "ecr": {
     "cache": {
       "age_days": 0.0,
-      "bytes": 38684016,
-      "fetched_utc": "2026-08-17T02:39:05+00:00",
+      "bytes": 38698021,
+      "fetched_utc": "2026-08-25T17:47:22+00:00",
       "path": "/Users/mattwang/Documents/fantasy/fantasy-football/data/cache/db_fpecr.parquet"
     },
-    "snapshot_date": "2026-08-14"
+    "cadence_days": 7.0,
+    "is_latest_available": true,
+    "latest_available": "2026-08-21",
+    "snapshot_date": "2026-08-21"
   },
   "market_adp": {
-    "adp_sd_filled": 505,
+    "adp_sd_filled": 518,
     "attached": true,
-    "coverage": 0.894,
+    "coverage": 0.917,
     "drafted_range": 180,
-    "matched": 188,
-    "matched_in_drafted_range": 161
+    "matched": 194,
+    "matched_in_drafted_range": 165
   },
   "refresh_requested": true,
-  "rows": 505,
+  "rows": 518,
   "season": 2026,
-  "skill_rows": 440,
+  "skill_rows": 452,
   "train_seasons": [
     2021,
     2022,

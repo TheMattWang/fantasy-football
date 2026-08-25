@@ -200,3 +200,74 @@ def test_the_board_write_leaves_no_temp_files_behind():
     working one used to be."""
     processed = Path("data/processed")
     assert not list(processed.glob("*.tmp")), "stale temp file from a failed write"
+
+
+# --- stale vs. as-fresh-as-the-source-allows ------------------------------
+#
+# The consensus feed publishes WEEKLY -- measured at a 7-day median gap over 361
+# snapshots -- so the flat 3-day draft bound was unsatisfiable four days out of
+# every seven, however promptly the board was rebuilt. That is worse than a
+# false alarm: a check that cannot be satisfied trains you to pass
+# `--allow-stale`, which disables the check entirely.
+#
+# These pin the distinction. The gate must stop condemning a board for the
+# source's publication schedule WITHOUT going quiet when we ship an old
+# snapshot or the feed dies.
+
+def latest(snapshot, cadence=7.0, **extra):
+    return {"snapshot_date": snapshot, "cadence_days": cadence,
+            "latest_available": snapshot, "is_latest_available": True, **extra}
+
+
+def test_the_newest_snapshot_the_source_has_is_draftable_past_the_flat_bound():
+    """4 days old, weekly feed, and nothing newer exists. Not our fault, and
+    nothing a rebuild could fix -- this is the case that was failing."""
+    old = (TODAY - dt.timedelta(days=4)).isoformat()
+    assert int(DRAFT_MAX_ECR_AGE_DAYS) < 4, "this test assumes the flat bound is tighter"
+    assert check(provenance(ecr=latest(old)), for_draft=True).ok
+
+
+def test_shipping_an_old_snapshot_when_a_newer_one_exists_is_still_fatal():
+    """The fault the gate actually exists to catch. Must survive the change."""
+    old = (TODAY - dt.timedelta(days=10)).isoformat()
+    prov = provenance(ecr={"snapshot_date": old, "cadence_days": 7.0,
+                           "latest_available": TODAY.isoformat(),
+                           "is_latest_available": False})
+    report = check(prov, for_draft=True)
+    assert not report.ok
+    assert any("days old" in m for m in report.fatal)
+
+
+def test_it_names_the_newer_snapshot_so_the_fix_is_obvious():
+    old = (TODAY - dt.timedelta(days=10)).isoformat()
+    prov = provenance(ecr={"snapshot_date": old, "cadence_days": 7.0,
+                           "latest_available": "2026-08-14",
+                           "is_latest_available": False})
+    assert any("2026-08-14" in m for m in check(prov, for_draft=True).fatal)
+
+
+def test_a_dead_feed_is_fatal_even_though_it_is_still_the_latest():
+    """Two missed publications means nobody published for a fortnight. Being
+    the newest snapshot in a feed that stopped updating is not freshness."""
+    old = (TODAY - dt.timedelta(days=21)).isoformat()
+    report = check(provenance(ecr=latest(old)), for_draft=True)
+    assert not report.ok
+    assert any("feed looks dead" in m for m in report.fatal)
+
+
+def test_a_board_with_no_cadence_recorded_keeps_the_strict_bound():
+    """Older sidecars predate the cadence fields. They must not silently get
+    the relaxed treatment -- absent evidence is not evidence of freshness."""
+    old = (TODAY - dt.timedelta(days=9)).isoformat()
+    report = check(provenance(ecr={"snapshot_date": old}), for_draft=True)
+    assert not report.ok
+
+
+def test_the_real_board_records_its_source_cadence():
+    """Provenance must actually carry the fields the gate reasons about."""
+    prov = load_provenance("data/processed/board_2026.csv")
+    assert prov is not None
+    ecr = prov["ecr"]
+    assert ecr.get("cadence_days"), "no measured cadence in provenance"
+    assert ecr.get("is_latest_available") is not None
+    assert ecr.get("latest_available")

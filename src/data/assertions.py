@@ -220,9 +220,58 @@ def _finish(report: BoardReport, raise_on_fatal: bool, emit_warnings: bool) -> B
 DRAFT_MAX_ECR_AGE_DAYS = 3.0
 RESEARCH_MAX_ECR_AGE_DAYS = 21.0
 
+# How many publication cycles may be missed before the FEED itself is presumed
+# broken. A board built from the newest snapshot the source has is as fresh as
+# it can possibly be, so the absolute bound above must not condemn it -- see
+# `_ecr_age_finding`. Two missed cycles means nobody published for a fortnight,
+# which is a source outage rather than a lazy rebuild.
+MAX_MISSED_PUBLICATIONS = 2.0
+
 # Below this share of the drafted range, `adp_sd` is mostly the fitted line
 # rather than measured dispersion, which is what P(next) is computed from.
 MIN_MARKET_COVERAGE = 0.80
+
+
+def _ecr_age_finding(ecr, snapshot, age, limit, stats):
+    """Is this board stale, or merely as fresh as the source allows?
+
+    Those are different failures and only one of them is ours. The consensus
+    feed publishes WEEKLY -- measured at a 7-day median gap over 361 snapshots
+    -- so a flat 3-day bound fails four days out of every seven however
+    promptly we rebuild, which trains everyone to pass `--allow-stale` and thus
+    disables the check it was meant to enforce.
+
+    So: if the board was built from the newest snapshot that existed, the only
+    thing left to detect is the feed going dark, and the bound for that is a
+    multiple of the feed's own measured cadence. If a NEWER snapshot existed and
+    we shipped an older one, that is a real and fixable fault and keeps the
+    strict bound.
+    """
+    is_latest = ecr.get("is_latest_available")
+    cadence = ecr.get("cadence_days")
+
+    if is_latest and cadence:
+        outage = float(cadence) * MAX_MISSED_PUBLICATIONS
+        stats["ecr_cadence_days"] = float(cadence)
+        stats["ecr_is_latest_available"] = True
+        if age > outage:
+            return (
+                f"ECR snapshot is {age} days old ({snapshot}) and it is still the "
+                f"newest the source has. At a {float(cadence):.0f}-day cadence that is "
+                f"{age / float(cadence):.0f} missed publications -- the feed looks dead, "
+                "so the rankings are genuinely out of date."
+            )
+        return None
+
+    if age > limit:
+        newer = ecr.get("latest_available")
+        extra = (f" A newer snapshot ({newer}) exists." if newer and newer != str(snapshot)
+                 else "")
+        return (
+            f"ECR snapshot is {age} days old ({snapshot}), limit {limit:.0f}.{extra} "
+            "Rebuild with --refresh."
+        )
+    return None
 
 
 def validate_freshness(
@@ -278,11 +327,10 @@ def validate_freshness(
             age = ((today or _datetime.date.today()) - taken).days
             report.stats["ecr_snapshot"] = str(snapshot)
             report.stats["ecr_age_days"] = age
-            if age > limit:
-                bucket.append(
-                    f"ECR snapshot is {age} days old ({snapshot}), limit {limit:.0f}. "
-                    "Consensus moves daily in August; rebuild with --refresh."
-                )
+            finding = _ecr_age_finding(provenance.get("ecr") or {}, snapshot, age, limit,
+                                       report.stats)
+            if finding:
+                bucket.append(finding)
 
     market = provenance.get("market_adp") or {}
     coverage = float(market.get("coverage") or 0.0)
