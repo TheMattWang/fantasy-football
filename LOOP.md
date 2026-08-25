@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R3 DONE -> next R4
+- **Round:** R4 DONE (partly blocked) -> next R5
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -30,7 +30,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 - [x] R1  Refresh board; suite green            (deadline-bound)
 - [x] R2  Byes from schedule + team normalizer
 - [x] R3  Sweep week.py across weeks 1-14
-- [ ] R4  Install loop machinery (hooks, autocompact, weekly LaunchAgent)
+- [x] R4  Install loop machinery -- hooks + autocompact DONE; **scheduling BLOCKED on TCC (Matt)**
 - [ ] R5  Refine availability table (report_status x practice_status)
 - [ ] R6  Price P(INA | Questionable) from nflverse; then judge Sleeper
 - [ ] R7  Waivers reachable from a CLI
@@ -53,6 +53,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 | D7 | Protocol enforced only on `replay_season`; worker scripts bypass `check()` | MEDIUM | OPEN (R8) |
 | D8 | `docs/findings/` has 4 files for 12 experiments; §13 claims one each | LOW | OPEN |
 | D9 | Untracked cruft not gitignored; `deployment/` is 8 empty dirs | LOW | OPEN |
+| D14 | macOS TCC blocks launchd from reading anything under `~/Documents`; the board-refresh plist could never have run | HIGH | **BLOCKED on Matt** -- grant /bin/bash Full Disk Access |
 | D13 | `week.py --week` unvalidated: 0 became week 1, 99 aggregated the whole season and printed a lineup | MEDIUM | **FIXED** (R3) |
 
 ## Decisions recorded (so they are not silently revisited)
@@ -201,3 +202,40 @@ catch a typo without refusing a legitimate week.
 Verified: **285 passed, 1 deselected**.
 
 **Verdict: KEPT.** T2 now green.
+
+### R4 — the loop machinery, and a plist that could never have worked (2026-08-25)
+
+**Done and working:**
+  * `PreCompact` hook commits and pushes `LOOP.md` before a compaction lands, so the
+    boundary is lossless. A hook cannot *initiate* a compaction -- researched, definitive
+    -- but it can make the crossing safe, which is the part that matters.
+  * `PostToolUse` context guard computes live context from the transcript's `usage`
+    records and warns at 85% of the window. Tested: silent below threshold, fires above,
+    exits 0 on junk input and on a missing transcript.
+  * `CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000` -- **40% of the 1M window**, which is the
+    setting that actually decides when auto-compaction fires.
+  * `PostCompact` extended to re-read `LOOP.md` first.
+  * `scripts/weekly_loop.sh` derives the current week from the schedule rather than a
+    hardcoded season start (today -> week 1; the 2026 season opens **2026-09-09**).
+
+**D14 — BLOCKED, and it reframes an earlier conclusion.** The board sat 11 days stale and
+the reason recorded was that the LaunchAgent was "written but never installed". That was
+too kind. Installing it fails with exit **126**, `Operation not permitted`: `~/Documents`
+is TCC-protected and a LaunchAgent runs without the user's TCC grants. A probe from inside
+`launchd` confirms it cannot read the directory, read a file, or run the venv python.
+
+So installing it would not have fixed anything -- it would have failed at 06:30 every
+morning into a log nobody reads, leaving the same stale board while *looking* handled.
+That is this project's signature failure one layer out: quiet degradation in the very
+thing built to prevent quiet degradation.
+
+The agent is therefore **removed** rather than left installed and failing, and both plists
+now carry the prerequisite in a comment so reinstalling cannot silently repeat it.
+
+**Needs Matt:** System Settings -> Privacy & Security -> Full Disk Access -> add
+`/bin/bash`. Then load either plist and check `launchctl list | grep fantasy` shows exit
+**0**, not 126. Alternative: move the repo out of `~/Documents`.
+
+Verified: **285 passed, 1 deselected**. Finding in `docs/findings/scheduling-blocked-by-tcc.md`.
+
+**Verdict: PARTIAL -- hooks KEPT, scheduling BLOCKED.**

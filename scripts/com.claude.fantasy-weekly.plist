@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The in-season beat, twice a week, timed to when data actually lands.
+
+    Tue 07:15  nflverse has published week N-1 results; waivers have run.
+               Grade last week's recommendation, then improve one thing.
+    Sun 09:45  final injury designations are out. Set the lineup you play.
+
+  Install AFTER the draft (there is nothing to do until the season opens):
+      cp scripts/com.claude.fantasy-weekly.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.claude.fantasy-weekly.plist
+  Remove with `launchctl unload` on the same path.
+
+  Deliberately NOT RunAtLoad: this drives an agent that commits and pushes, and
+  it should fire on the schedule rather than whenever the machine reboots.
+-->
+<!--
+  PREREQUISITE, and it is not optional: `/bin/bash` needs Full Disk Access.
+
+  This repo lives under ~/Documents, which macOS protects with TCC. A LaunchAgent
+  runs as you but WITHOUT your TCC grants, so without the grant it cannot even
+  read this script -- exit 126, "Operation not permitted" -- and it fails that way
+  every single firing, quietly, into a log nobody reads.
+
+  That is worse than no schedule at all, because it looks like coverage. Verified
+  2026-08-25: read repo dir DENIED, read file DENIED, run venv python DENIED.
+  See docs/findings/scheduling-blocked-by-tcc.md.
+
+      System Settings -> Privacy & Security -> Full Disk Access -> add /bin/bash
+
+  After loading, CHECK IT RAN: `launchctl list | grep fantasy` -- the middle
+  column is the last exit status and it must be 0, not 126.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.fantasy-weekly</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/mattwang/Documents/fantasy/fantasy-football/scripts/weekly_loop.sh</string>
+        <string>tuesday</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key><integer>2</integer>
+            <key>Hour</key><integer>7</integer>
+            <key>Minute</key><integer>15</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>0</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>45</integer>
+        </dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/mattwang/.claude/daily-log/fantasy-weekly.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mattwang/.claude/daily-log/fantasy-weekly.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TZ</key><string>America/Los_Angeles</string>
+        <key>FANTASY_SEASON</key><string>2026</string>
+        <key>CLAUDE_CODE_AUTO_COMPACT_WINDOW</key><string>400000</string>
+    </dict>
+</dict>
+</plist>

@@ -14,6 +14,23 @@
   that has already been pulled forward. RunAtLoad fires it once on install so
   you find out immediately whether it works, rather than tomorrow morning.
 -->
+<!--
+  PREREQUISITE, and it is not optional: `/bin/bash` needs Full Disk Access.
+
+  This repo lives under ~/Documents, which macOS protects with TCC. A LaunchAgent
+  runs as you but WITHOUT your TCC grants, so without the grant it cannot even
+  read this script -- exit 126, "Operation not permitted" -- and it fails that way
+  every single firing, quietly, into a log nobody reads.
+
+  That is worse than no schedule at all, because it looks like coverage. Verified
+  2026-08-25: read repo dir DENIED, read file DENIED, run venv python DENIED.
+  See docs/findings/scheduling-blocked-by-tcc.md.
+
+      System Settings -> Privacy & Security -> Full Disk Access -> add /bin/bash
+
+  After loading, CHECK IT RAN: `launchctl list | grep fantasy` -- the middle
+  column is the last exit status and it must be 0, not 126.
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
