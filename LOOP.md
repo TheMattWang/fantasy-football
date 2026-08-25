@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R6 DONE (KILLED) -> next R7
+- **Round:** R6b DONE -> **next R7 (waivers reachable from a CLI)**
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -33,8 +33,9 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 - [x] R4  Install loop machinery -- hooks + autocompact DONE; **scheduling BLOCKED on TCC (Matt)**
 - [x] R5  Availability multiplier denominator fixed (0.456 -> 0.542); practice-status split MEASURED, not shipped
 - [x] R6  Practice-participation split: built, decision-tested, **KILLED**, reverted
-- [ ] R6b Price P(inactive | Questionable) from `weekly_rosters.status=='INA'` (free, on disk)
-- [ ] R7  Waivers reachable from a CLI
+- [x] R6b Game-day feed CEILING measured: +0.515 pts/roster-week (+7.2/season), 4/4 seasons
+- [ ] R7  Waivers reachable from a CLI  <-- NEXT. R6b motivates it: the wide-vs-narrow
+         oracle gap is largely 'your roster contains someone who is not playing at all'
 - [ ] R8  Close the protocol hole
 - [ ] R9  Expand training to 2019-2020  (GATED — last; irreversible)
 
@@ -72,6 +73,24 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
   sees blanket 403s. But public-league *HTML* works unauthenticated including `/settings`
   with full scoring config. That is a possible route out of `PROVISIONAL` — not scheduled,
   recorded so it is not lost.
+
+## If you are a fresh context, read this first
+
+Eight commits so far, all pushed, `cdaa608..b8ec645`. **286 tests, 1 deselected (network).**
+The suite is green and both CLIs run end to end. Nothing is half-finished.
+
+What this loop is for: **not** a ninth search for a draft edge. Eight came back null and
+the project's own pre-registered stopping rule is met. The job is correctness and
+coverage -- which is where every win this session came from.
+
+The pattern that keeps repeating, now three times over, is worth holding onto:
+**a strong predictor is not a better decision.** Test in decision units or you will ship
+V8 and V9 again.
+
+Two things need Matt and nothing else can proceed on them:
+  * **D14 TCC** -- no LaunchAgent can read this repo. Grant `/bin/bash` Full Disk Access.
+  * **Yahoo OAuth** -- the league config is still PROVISIONAL, so every VORP rests on
+    guessed roster slots.
 
 ## Ledger of completed rounds
 
@@ -310,3 +329,31 @@ it collapses it. And the prize is measurable for free first --
 `weekly_rosters.status == 'INA'` is already on disk.
 
 **Verdict: KILLED.** Finding in `docs/findings/v9-practice-participation.md`.
+
+### R6b — bounding the game-day feed, and a 12x overclaim caught (2026-08-25)
+
+V9's parting suggestion, priced with data already on disk. Joining Friday designations to
+realised `weekly_rosters.status`: **29.8% of Questionable players are inactive**, and all
+1,717 of them are currently priced at one number.
+
+**The first oracle said +6.311 pts/roster-week -- +88 a season -- and it was wrong by an
+order of magnitude.** It zeroed anyone without a stat line, which also resolves players on
+IR, healthy scratches, and anyone never on a report. No feed gives you that, and much of
+it is not a lineup question at all but "do not roster someone on IR" -- which these
+synthetic rosters never do because they never touch waivers.
+
+Restricted to the population an inactive list actually covers: **+0.515 pts/roster-week
+(se 0.119), +7.21 a season, 4/4 seasons positive.** That is the number to judge, and a
+real feed is strictly worse than it.
+
+For scale: game-day ceiling **+0.515**, R5's shipped fix **+0.076**, V9 **-0.006**. So
+~7x the best thing shipped today, and like R5 it replaces an estimate with an
+*observation* rather than resting on a claim about football -- which is the category that
+has actually worked here. Still only ~7 points a season against a ~107-point weekly total:
+worth a Sunday poll of a free endpoint, not worth a subsystem.
+
+Ordered next steps are in `docs/findings/gameday-feed-ceiling.md`. Join by `sleeper_id`
+(97.2% coverage in `weekly_rosters`), not by name. **The ceiling is not the result** -- a
+real feed still has to pass the decision test.
+
+**Verdict: MEASURED, build queued.**
