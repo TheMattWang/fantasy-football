@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R5 DONE -> next R6
+- **Round:** R6 DONE (KILLED) -> next R7
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -32,7 +32,8 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 - [x] R3  Sweep week.py across weeks 1-14
 - [x] R4  Install loop machinery -- hooks + autocompact DONE; **scheduling BLOCKED on TCC (Matt)**
 - [x] R5  Availability multiplier denominator fixed (0.456 -> 0.542); practice-status split MEASURED, not shipped
-- [ ] R6  Price P(INA | Questionable) from nflverse; then judge Sleeper
+- [x] R6  Practice-participation split: built, decision-tested, **KILLED**, reverted
+- [ ] R6b Price P(inactive | Questionable) from `weekly_rosters.status=='INA'` (free, on disk)
 - [ ] R7  Waivers reachable from a CLI
 - [ ] R8  Close the protocol hole
 - [ ] R9  Expand training to 2019-2020  (GATED — last; irreversible)
@@ -48,7 +49,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 | D3 | `bye` covers 188/505 board rows; roster player outside FFC top-190 gets no bye check | HIGH | **FIXED** (R2) |
 | D4 | No team-abbreviation normalizer: `JAX`/`JAC`, `LA`/`LAR` silently drop 2 teams | HIGH | **FIXED** (R2) |
 | D12 | FFC carries a stale team for Kayshon Boutte (HOU; nflverse+board say NE) | LOW | **WONTFIX** -- upstream feed error, now detected and warned; schedule value wins |
-| D5 | `STATUS_MULTIPLIER` averages over 3 distinct practice states; 292 no-designation DNP weeks scored healthy at 1.0 when data says ~0.72 | MEDIUM | OPEN -- measured, needs a decision test before shipping (R6) |
+| D5 | `STATUS_MULTIPLIER` averages over 3 distinct practice states; 292 no-designation DNP weeks scored healthy at 1.0 | MEDIUM | **WONTFIX** (R6) -- decision-tested and it makes lineups WORSE (1/4 seasons, t=-0.28). See v9 finding. |
 | D15 | Questionable multiplier divided by a conditional mean, not an expectation -- understated by 19% | MEDIUM | **FIXED** (R5) |
 | D6 | `rank_waiver_adds` unreachable from any CLI | MEDIUM | OPEN (R7) |
 | D7 | Protocol enforced only on `replay_season`; worker scripts bypass `check()` | MEDIUM | OPEN (R8) |
@@ -273,3 +274,39 @@ Verified: **286 passed, 1 deselected**. Finding in
 `docs/findings/availability-multiplier-denominator.md`.
 
 **Verdict: KEPT.**
+
+### R6 — practice participation: built it, tested it, killed it (2026-08-25)
+
+The R5 leftover. Friday practice splits the designations and the prediction side looked
+emphatic -- 292 player-weeks carry no game-status designation yet did not practice, and
+the code scored every one at **1.0** when the data says **0.606**. That is the single
+largest mispricing in the table.
+
+Implemented fully: practice-aware multiplier table, `injury_report` retaining
+no-designation rows, dedup breaking ties toward the worse practice status, four new
+tests, 289 passing. Then decision-tested against actual results, four seasons:
+
+  * both cells together: **-0.199 pts** per changed lineup, **1/4 seasons positive**,
+    season-clustered **t = -0.28**
+  * no-designation DNP alone: **-0.850**, t = -0.72 -- the strongest *predictor* makes
+    the *decision worse*
+  * Questionable/DNP alone: +1.627, t = +1.32 -- short of the |t| >= 2 bar, and V6 was
+    killed at +1.78
+
+**Reverted.** Code gone, finding and scripts kept. Back to 286 passing.
+
+Third independent instance of the same shape (board +22.4 pts/pick; V8 t=+6.10 -> +0.072
+and 47%; V9 0.606-vs-1.0 -> -0.199 and 1/4). Being right about a player's *level* only
+pays when it changes *which player you start*, and a DNP discount only moves someone past
+a starter when the two were already near-tied -- exactly where the ranking is noisiest.
+
+Worth contrasting with R5, shipped the same day at a similar effect size: that corrected a
+ratio whose halves were in different units and would have been right regardless. This was
+a claim about football, and claims about football must clear the decision bar.
+
+Next candidate is different in kind: a **live game-day feed**. `Questionable -> 0.542`
+exists because Friday is uncertain; a real inactive list does not sharpen that estimate,
+it collapses it. And the prize is measurable for free first --
+`weekly_rosters.status == 'INA'` is already on disk.
+
+**Verdict: KILLED.** Finding in `docs/findings/v9-practice-participation.md`.
