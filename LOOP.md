@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R6b DONE -> **next R7 (waivers reachable from a CLI)**
+- **Round:** R7 DONE -> **next R8 (close the protocol hole)**
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -20,7 +20,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 |----|-------|--------|
 | T1 | board fresh; `draft_day.py` starts without `--allow-stale`; 15-round offline dry run | **PASS** (dry run pending) |
 | T2 | `week.py` runs weeks 1-14, no traceback, no silently-wrong output | **PASS** |
-| T3 | suite green; every defect fixed this run has a regression test | **PASS** (286/286) |
+| T3 | suite green; every defect fixed this run has a regression test | **PASS** (292/292) |
 | T4 | defect ledger has zero open entries | OPEN |
 | T5 | two consecutive rounds add nothing new | 0 of 2 |
 
@@ -34,8 +34,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 - [x] R5  Availability multiplier denominator fixed (0.456 -> 0.542); practice-status split MEASURED, not shipped
 - [x] R6  Practice-participation split: built, decision-tested, **KILLED**, reverted
 - [x] R6b Game-day feed CEILING measured: +0.515 pts/roster-week (+7.2/season), 4/4 seasons
-- [ ] R7  Waivers reachable from a CLI  <-- NEXT. R6b motivates it: the wide-vs-narrow
-         oracle gap is largely 'your roster contains someone who is not playing at all'
+- [x] R7  Waivers reachable from a CLI + dead-weight detection
 - [ ] R8  Close the protocol hole
 - [ ] R9  Expand training to 2019-2020  (GATED — last; irreversible)
 
@@ -52,7 +51,8 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 | D12 | FFC carries a stale team for Kayshon Boutte (HOU; nflverse+board say NE) | LOW | **WONTFIX** -- upstream feed error, now detected and warned; schedule value wins |
 | D5 | `STATUS_MULTIPLIER` averages over 3 distinct practice states; 292 no-designation DNP weeks scored healthy at 1.0 | MEDIUM | **WONTFIX** (R6) -- decision-tested and it makes lineups WORSE (1/4 seasons, t=-0.28). See v9 finding. |
 | D15 | Questionable multiplier divided by a conditional mean, not an expectation -- understated by 19% | MEDIUM | **FIXED** (R5) |
-| D6 | `rank_waiver_adds` unreachable from any CLI | MEDIUM | OPEN (R7) |
+| D6 | `rank_waiver_adds` unreachable from any CLI | MEDIUM | **FIXED** (R7) |
+| D16 | A player on IR vanishes from the injury report, so `availability` prices him at 1.0 | MEDIUM | **FIXED** (R7) -- `idle_players` |
 | D7 | Protocol enforced only on `replay_season`; worker scripts bypass `check()` | MEDIUM | OPEN (R8) |
 | D8 | `docs/findings/` has 4 files for 12 experiments; §13 claims one each | LOW | OPEN |
 | D9 | Untracked cruft not gitignored; `deployment/` is 8 empty dirs | LOW | OPEN |
@@ -76,7 +76,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 
 ## If you are a fresh context, read this first
 
-Eight commits so far, all pushed, `cdaa608..b8ec645`. **286 tests, 1 deselected (network).**
+Ten commits so far, all pushed, from `cdaa608`. **292 tests, 1 deselected (network).**
 The suite is green and both CLIs run end to end. Nothing is half-finished.
 
 What this loop is for: **not** a ninth search for a draft edge. Eight came back null and
@@ -357,3 +357,33 @@ Ordered next steps are in `docs/findings/gameday-feed-ceiling.md`. Join by `slee
 real feed still has to pass the decision test.
 
 **Verdict: MEASURED, build queued.**
+
+### R7 — waivers reachable, and the players the injury report cannot see (2026-08-25)
+
+`rank_waiver_adds` existed and was tested but no CLI called it -- `RUNBOOK.md` told you to
+open a Python REPL -- and it needs opponent rosters that do not exist without Yahoo. Two
+additions to `week.py`, neither needing an opponent:
+
+**`idle_players`** -- rostered players with no stat line for N weeks. Motivated directly by
+R6b: **a player on IR stops appearing on the weekly injury report altogether**, so there is
+no designation to read and `availability` prices him at **1.0**. Being idle is the only
+visible signal. Measured on 2025, **8-11%** of the top-300 board players are idle three
+straight weeks at any point -- about 1.4 on a 15-man roster. Not a lineup decision; a
+roster spot doing nothing.
+
+**`better_than_worst_starter`** -- who would actually start if we had them.
+
+**The bug I nearly shipped.** The first version ranked candidates by rate against the worst
+starter, and returned **six quarterbacks**. There is one QB slot and Josh Allen was in it,
+so not one of them could ever have started -- rate alone ignores positional eligibility.
+Rewritten to ask *would he start*, by running the real slot allocation with the candidate
+added. It now correctly returns nothing for a strong roster and real RB upgrades for a weak
+one, each displacing a named starter.
+
+Caveat stated in the output rather than hidden: with no league connection, everyone not on
+our roster counts as available, so most of the list is somebody else's player.
+
+Verified end to end on a synthetic roster: found 6 idle players including two not planted
+(Jayden Reed 10 weeks, Darren Waller 4). **292 passed, 1 deselected.**
+
+**Verdict: KEPT.**

@@ -50,6 +50,8 @@ from src.data.league_config import load_or_provisional  # noqa: E402
 from src.inseason.availability import availability, injury_report  # noqa: E402
 from src.inseason.waivers import (  # noqa: E402
     best_lineup,
+    better_than_worst_starter,
+    idle_players,
     observed_to_date,
     start_sit,
 )
@@ -102,6 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "ranks across that whole range, so this is not a "
                              "knife edge and 2 is not load-bearing.")
     parser.add_argument("--samples", type=int, default=400)
+    parser.add_argument("--idle-weeks", type=int, default=3,
+                        help="flag a rostered player with no stat line for this "
+                             "many weeks. He is not a start/sit question, he is a "
+                             "roster spot doing nothing -- and the injury report "
+                             "cannot see him, because a player on IR stops "
+                             "appearing on it entirely.")
+    parser.add_argument("--no-waivers", action="store_true",
+                        help="skip the upgrade list")
     return parser
 
 
@@ -203,6 +213,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         if (sidelined["start"] & (sidelined["expected"] == 0)).any():
             print("    ^ a zero-expected player is STARTING -- you have no one "
                   "else eligible at that slot. Check waivers.")
+
+    # Two things a lineup optimiser cannot fix, so they are reported separately.
+    #
+    # Dead weight first. `availability` prices a player on IR at 1.0, because he
+    # stops appearing on the weekly injury report altogether -- there is no
+    # designation to read. Measured on 2025, 8-11% of the top 300 board players
+    # are idle three straight weeks at any point, about 1.4 on a 15-man roster.
+    idle = (idle_players(roster, args.season, args.week,
+                         lookback=args.idle_weeks)
+            if observed is not None else pd.DataFrame())
+    if len(idle):
+        print("\n  DEAD WEIGHT -- no stat line in "
+              f"{args.idle_weeks}+ weeks:")
+        for _, row in idle.iterrows():
+            print(f"    {row['player']:<26}{row['weeks_idle']:>3} weeks idle "
+                  f"(last played week {row['last_week']})")
+        print("    ^ not a lineup decision. These are roster spots doing nothing.")
+
+    if not args.no_waivers:
+        upgrades = better_than_worst_starter(
+            roster, samples, config, week=args.week, observed=observed,
+            prior_games=args.prior_games, availability=avail, top=6)
+        if len(upgrades):
+            print("\n  WOULD START IF YOU HAD THEM:")
+            for _, row in upgrades.iterrows():
+                print(f"    {row['player']:<26}{row['position']:<5}"
+                      f"{row['rate']:>6.1f} ppg   over {row['displaces']}")
+            print("    ^ no league connection, so anyone not on your roster counts")
+            print("      as available. Most of these are somebody else's players.")
 
     # The value of reacting is exactly the picks that differ from the frozen
     # lineup, so show those rather than making the reader diff two tables.

@@ -158,3 +158,65 @@ def test_start_sit_starts_every_slot_it_can_fill(league):
     expected = sum(count for slot, count in config.starting_slots.items()
                    if slot not in unfillable)
     assert frame["start"].sum() == expected
+
+
+# --- two things a lineup optimiser cannot fix ------------------------------
+
+def test_an_idle_player_is_flagged_however_good_his_projection():
+    """A player on IR stops appearing on the weekly injury report entirely, so
+    `availability` prices him at 1.0 -- there is no designation to read. Being
+    idle for weeks is the only visible signal, and it is not a start/sit
+    question: it is a roster spot doing nothing."""
+    from src.inseason.waivers import idle_players
+
+    frame = idle_players(["Joe Burrow"], 2025, 12, lookback=3)
+    assert len(frame) == 1
+    assert frame.iloc[0]["weeks_idle"] >= 3
+    assert frame.iloc[0]["last_week"] < 12
+
+
+def test_a_player_who_is_playing_is_not_flagged():
+    from src.inseason.waivers import idle_players
+
+    assert idle_players(["Josh Allen"], 2025, 12, lookback=3).empty
+
+
+def test_idle_needs_enough_season_to_judge():
+    """Week 2 cannot show three weeks of absence."""
+    from src.inseason.waivers import idle_players
+
+    assert idle_players(["Joe Burrow"], 2025, 2, lookback=3).empty
+
+
+def test_upgrades_respect_positional_eligibility(league):
+    """The bug this replaced: ranking free agents by rate against the worst
+    starter returned a list of quarterbacks, because a QB out-scores a weak TE.
+    There is one QB slot and it is filled, so none of them could ever start.
+    The test has to be 'would he start', which means running the real slot
+    allocation with him added."""
+    board, samples, config, roster = league
+    from src.inseason.waivers import better_than_worst_starter
+
+    frame = better_than_worst_starter(roster, samples, config, top=10)
+    for _, row in frame.iterrows():
+        assert row["player"] not in roster
+        assert row["displaces"], "an upgrade must displace a named starter"
+
+
+def test_a_strong_roster_has_no_upgrades(league):
+    """Nothing improves a lineup already made of the best players available."""
+    _, samples, config, roster = league
+    from src.inseason.waivers import better_than_worst_starter
+
+    assert better_than_worst_starter(roster, samples, config, top=5).empty
+
+
+def test_a_weak_roster_does_have_upgrades(league):
+    board, samples, config, _ = league
+    from src.inseason.waivers import better_than_worst_starter
+
+    weak = (board[~board["is_streamed"]].nlargest(140, "VORP")
+            .tail(15)["player_name"].tolist())
+    frame = better_than_worst_starter(weak, samples, config, top=6)
+    assert len(frame) > 0, "a bottom-of-the-board roster must be improvable"
+    assert all(p not in weak for p in frame["player"])
