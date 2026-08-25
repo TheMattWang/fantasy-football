@@ -10,7 +10,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 ## Current
 
 - **Phase:** A
-- **Round:** R4 DONE (partly blocked) -> next R5
+- **Round:** R5 DONE -> next R6
 - **Started:** 2026-08-25
 - **Sealed touches spent:** 0 of 3. **2021 stays clean.**
 
@@ -20,7 +20,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 |----|-------|--------|
 | T1 | board fresh; `draft_day.py` starts without `--allow-stale`; 15-round offline dry run | **PASS** (dry run pending) |
 | T2 | `week.py` runs weeks 1-14, no traceback, no silently-wrong output | **PASS** |
-| T3 | suite green; every defect fixed this run has a regression test | **PASS** (285/285) |
+| T3 | suite green; every defect fixed this run has a regression test | **PASS** (286/286) |
 | T4 | defect ledger has zero open entries | OPEN |
 | T5 | two consecutive rounds add nothing new | 0 of 2 |
 
@@ -31,7 +31,7 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 - [x] R2  Byes from schedule + team normalizer
 - [x] R3  Sweep week.py across weeks 1-14
 - [x] R4  Install loop machinery -- hooks + autocompact DONE; **scheduling BLOCKED on TCC (Matt)**
-- [ ] R5  Refine availability table (report_status x practice_status)
+- [x] R5  Availability multiplier denominator fixed (0.456 -> 0.542); practice-status split MEASURED, not shipped
 - [ ] R6  Price P(INA | Questionable) from nflverse; then judge Sleeper
 - [ ] R7  Waivers reachable from a CLI
 - [ ] R8  Close the protocol hole
@@ -48,7 +48,8 @@ Phase A = now -> draft day (readiness). Phase B = draft day -> end of season (we
 | D3 | `bye` covers 188/505 board rows; roster player outside FFC top-190 gets no bye check | HIGH | **FIXED** (R2) |
 | D4 | No team-abbreviation normalizer: `JAX`/`JAC`, `LA`/`LAR` silently drop 2 teams | HIGH | **FIXED** (R2) |
 | D12 | FFC carries a stale team for Kayshon Boutte (HOU; nflverse+board say NE) | LOW | **WONTFIX** -- upstream feed error, now detected and warned; schedule value wins |
-| D5 | `STATUS_MULTIPLIER` averages over 3 distinct practice states; 289 no-designation DNP weeks scored healthy | MEDIUM | OPEN (R5) |
+| D5 | `STATUS_MULTIPLIER` averages over 3 distinct practice states; 292 no-designation DNP weeks scored healthy at 1.0 when data says ~0.72 | MEDIUM | OPEN -- measured, needs a decision test before shipping (R6) |
+| D15 | Questionable multiplier divided by a conditional mean, not an expectation -- understated by 19% | MEDIUM | **FIXED** (R5) |
 | D6 | `rank_waiver_adds` unreachable from any CLI | MEDIUM | OPEN (R7) |
 | D7 | Protocol enforced only on `replay_season`; worker scripts bypass `check()` | MEDIUM | OPEN (R8) |
 | D8 | `docs/findings/` has 4 files for 12 experiments; §13 claims one each | LOW | OPEN |
@@ -239,3 +240,36 @@ now carry the prerequisite in a comment so reinstalling cannot silently repeat i
 Verified: **285 passed, 1 deselected**. Finding in `docs/findings/scheduling-blocked-by-tcc.md`.
 
 **Verdict: PARTIAL -- hooks KEPT, scheduling BLOCKED.**
+
+### R5 — the availability multiplier divided by the wrong thing (2026-08-25)
+
+`STATUS_MULTIPLIER["Questionable"] = 0.456` was `0.567 x 6.95 / 8.66` -- dividing by what
+a healthy player scores **when he plays**. But a healthy player only plays 84% of the
+time, so it compared an expectation against a conditional mean and ranked Questionable
+players **19% too low**. Like for like: `3.945 / 7.277 = 0.542`.
+
+Ironic in context: the module exists because "every hand-written constant in this project
+has eventually turned out to be wrong", and it measured both halves of the numerator
+carefully -- then dropped half the denominator.
+
+Decision-tested per guardrail 3, 60 rosters x weeks 3-14 x four seasons against actual
+results: moves **2%** of lineups, **+1.88 points** each time it does, **4/4 seasons
+positive**, season-clustered **+0.0758 (se 0.0168, t = +4.50)**.
+
+**The comparison that decides it, stated rather than buried: +0.076 pts/roster-week is
+essentially V8's +0.072, and V8 was killed.** It ships anyway because (1) V8 won 47% of
+the time with the sign flipping by season while this is positive in every season at
+52-68%, and (2) V8 proposed a new claim about football whereas this fixes a ratio whose
+numerator and denominator were in different units -- it would be right even if it never
+moved a lineup. Shipped on correctness, with the decision value as corroboration only.
+
+Also measured but **deliberately not shipped**: the practice-participation split. 292
+player-weeks carry no designation yet did not practice, and the code scores every one at
+1.0 when the data says ~0.72. `availability()` keys only on `report_status`, so this needs
+a code change and a decision test first -- queued as R6 rather than assumed, which is the
+discipline that killed V8.
+
+Verified: **286 passed, 1 deselected**. Finding in
+`docs/findings/availability-multiplier-denominator.md`.
+
+**Verdict: KEPT.**

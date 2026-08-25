@@ -75,9 +75,23 @@ def test_out_and_doubtful_are_zero_not_merely_discounted():
 
 
 def test_questionable_is_roughly_half():
-    """0.567 play rate x (6.95 / 8.66) points when they do play. Ranking a
-    Questionable player at his full rate overstates him by over 2x."""
-    assert 0.3 < STATUS_MULTIPLIER["Questionable"] < 0.6
+    """0.567 play rate, and he underperforms when he does play. Ranking him at
+    his full rate overstates him by nearly 2x."""
+    assert 0.3 < STATUS_MULTIPLIER["Questionable"] < 0.7
+
+
+def test_the_questionable_multiplier_compares_expectation_to_expectation():
+    """The bug this replaced: 0.456 divided by a healthy player's points WHEN
+    HE PLAYS (8.66), while a healthy player only plays 84% of the time. That
+    compares an expectation against a conditional mean and understates
+    Questionable by 19%.
+
+        E[pts | Questionable] / E[pts | no report] = 3.945 / 7.277 = 0.542
+    """
+    assert STATUS_MULTIPLIER["Questionable"] == pytest.approx(0.542, abs=0.01)
+    assert STATUS_MULTIPLIER["Questionable"] > 0.456, (
+        "regressed to the ratio that divided by a conditional mean"
+    )
 
 
 def test_a_bye_is_certain():

@@ -13,11 +13,11 @@ this project has eventually turned out to be wrong -- the waiver floors, the
 injury reports over 2022-2025, and `experiments/worker_availability.py`
 reproduces them.
 
-    status          n     P(played)   mean pts | played
-    Out          1342         0.003                0.00
-    Doubtful      197         0.010                1.30
-    Questionable 1717         0.567                6.95
-    (no report)  3525         0.840                8.66
+    status          n     P(played)   mean pts | played   E[pts]
+    Out          1342         0.003                0.00     0.000
+    Doubtful      197         0.010                1.30     0.013
+    Questionable 1717         0.567                6.95     3.945
+    (no report)  3525         0.840                8.66     7.277
 
 Two things in that table are worth reading twice.
 
@@ -25,11 +25,18 @@ Two things in that table are worth reading twice.
 Doubtful at 1.0%.
 
 **Questionable is a coin flip that also underperforms.** 56.7% play, and when
-they do play they score 6.95 against 8.66 for a player with no report -- so the
-expected value is P(played) x points-when-played, relative to no designation,
-which the script computes as **0.456**. Ranking a Questionable player at his
-full rate overstates him by more than a factor of two, which is easily enough to
-start the wrong man.
+they do play they score 6.95 against 8.66 for a player with no report. Ranking
+him at his full rate overstates him by nearly a factor of two, which is easily
+enough to start the wrong man.
+
+**And the denominator has to be an expectation too.** The multiplier first
+shipped here was 0.456 = 0.567 x 6.95 / 8.66, dividing by what a healthy player
+scores *when he plays*. But a healthy player only plays 84% of the time, so that
+compared an expectation against a conditional mean and pushed Questionable 19%
+too low. The like-for-like ratio is E[pts | Q] / E[pts | none] = 3.945 / 7.277 =
+**0.542**. `worker_availability_decision.py` scores the correction against what
+actually happened: it moves 2% of lineups, is worth +1.88 points each time it
+does, and is positive in all four seasons (season-clustered t = +4.50).
 
 The multipliers below are copied from that script's output rather than derived
 by hand here, so the two cannot drift apart.
@@ -50,7 +57,12 @@ from ..projections.ecr import normalize_name
 STATUS_MULTIPLIER: Dict[str, float] = {
     "Out": 0.000,          # measured 0.000 -- a 0.003 play rate at 0.00 points
     "Doubtful": 0.000,     # measured 0.002 -- rounded down; it is not startable
-    "Questionable": 0.456,
+    # 0.542, not the 0.456 first shipped. That figure divided by a healthy
+    # player's points *when he plays* (8.66), but a healthy player only takes
+    # the field 84% of the time, so it compared an expectation against a
+    # conditional mean and understated Questionable by 19%. Like for like:
+    #     E[pts | Questionable] / E[pts | no report] = 3.945 / 7.277 = 0.542
+    "Questionable": 0.542,
 }
 
 # A bye is certain, unlike an injury report. No estimation involved.
